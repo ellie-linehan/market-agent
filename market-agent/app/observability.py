@@ -6,6 +6,7 @@ from opentelemetry.trace import Span
 
 _AGENT_PARENTS: dict[str, str | None] = {
     "market_intelligence_agent": None,
+    "profiler_agent": "market_intelligence_agent",
     "parallel_research": "market_intelligence_agent",
     "competitive_agent": "parallel_research",
     "icp_agent": "parallel_research",
@@ -79,6 +80,26 @@ class SessionMappingExporter(SpanExporter):
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:
         return self._wrapped.force_flush(timeout_millis)
+
+
+def log_feedback(
+    company: str, item_type: str, item_key: str, item_label: str, decision: str
+) -> None:
+    """Emit a user-feedback span so keep/dismiss signal flows into Arize.
+
+    The enrichment processor stamps arize.project.name on every span, so this
+    lands in the same project as the agent traces and becomes the human-feedback
+    layer of the eval story.
+    """
+    from opentelemetry import trace
+
+    tracer = trace.get_tracer("market-agent.feedback")
+    with tracer.start_as_current_span("user_feedback") as span:
+        span.set_attribute("feedback.company", company)
+        span.set_attribute("feedback.item_type", item_type)
+        span.set_attribute("feedback.item_key", item_key)
+        span.set_attribute("feedback.item_label", item_label)
+        span.set_attribute("feedback.decision", decision)
 
 
 def setup_arize() -> None:

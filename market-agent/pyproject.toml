@@ -10,7 +10,6 @@ dependencies = [
     "opentelemetry-instrumentation-google-genai>=0.1.0,<1.0.0",
     "gcsfs>=2024.11.0",
     "pymongo>=4.7.0",
-    "elasticsearch>=8.13.0",
     "python-dotenv>=1.0.0",
     "graphviz>=0.21",
     "arize-otel>=0.13.0",
