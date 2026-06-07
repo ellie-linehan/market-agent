@@ -83,6 +83,12 @@ async def companies():
     return {"companies": await asyncio.to_thread(store.list_companies)}
 
 
+@app.get("/changes")
+async def changes(url: str):
+    """What changed between the two most recent analyses of a company."""
+    return await asyncio.to_thread(store.get_changes, url)
+
+
 @app.post("/feedback")
 async def feedback(req: FeedbackRequest):
     """Record a keep/dismiss and log it to Arize as human-feedback signal."""

@@ -129,6 +129,85 @@ def format_preferences(company_url: str) -> str:
     return "\n".join(lines)
 
 
+def _norm_name(s: str | None) -> str:
+    """Normalize a company name for identity matching: drop parentheticals and
+    punctuation so 'LRS (PensionGold)' and 'LRS (Levi, Ray & Shoup)' collide."""
+    s = (s or "").lower()
+    s = re.sub(r"\([^)]*\)", " ", s)  # drop parentheticals
+    s = re.sub(r"[^a-z0-9]+", " ", s)  # punctuation -> space
+    return " ".join(s.split())
+
+
+def _pricing_bucket(model: str | None) -> str:
+    """Coarse pricing category, so reworded 'undisclosed' text isn't a 'change'."""
+    m = (model or "").lower()
+    if not m:
+        return ""
+    if "undisclosed" in m or "unknown" in m:
+        return "undisclosed"
+    if "freemium" in m or "free tier" in m or "free plan" in m:
+        return "freemium"
+    if "open source" in m:
+        return "open-source"
+    if "usage" in m or "per host" in m or "per gb" in m or "consumption" in m:
+        return "usage"
+    if "tiered" in m or ("free" in m and "pro" in m):
+        return "tiered"
+    if any(t in m for t in ("subscription", "/month", "/seat", "/user", "saas")):
+        return "subscription"
+    if any(t in m for t in ("enterprise", "custom", "rfp", "license")):
+        return "enterprise"
+    return "other"
+
+
+def _competitor_key(c: dict) -> str:
+    return _norm_name(c.get("name")) or _norm_name(c.get("url"))
+
+
+def _prospect_key(p: dict) -> str:
+    return _norm_name(p.get("company_name")) or _norm_name(p.get("website"))
+
+
+def diff_analyses(prev: dict, curr: dict) -> dict:
+    """What moved between two analyses: entrants, exits, and pricing shifts."""
+    pc = {_competitor_key(c): c for c in prev.get("competitors", [])}
+    cc = {_competitor_key(c): c for c in curr.get("competitors", [])}
+    pricing_changed = []
+    for key, comp in cc.items():
+        if key in pc:
+            before = _pricing_bucket(pc[key].get("pricing_model"))
+            after = _pricing_bucket(comp.get("pricing_model"))
+            if before and after and before != after:
+                pricing_changed.append(
+                    {"name": comp.get("name"), "from": pc[key].get("pricing_model"), "to": comp.get("pricing_model")}
+                )
+
+    pp = {_prospect_key(p): p for p in prev.get("icp_prospects", [])}
+    cp = {_prospect_key(p): p for p in curr.get("icp_prospects", [])}
+
+    return {
+        "competitors_added": [cc[k] for k in cc if k and k not in pc],
+        "competitors_removed": [pc[k] for k in pc if k and k not in cc],
+        "pricing_changed": pricing_changed,
+        "prospects_added": [cp[k] for k in cp if k and k not in pp],
+        "prospects_removed": [pp[k] for k in pp if k and k not in cp],
+    }
+
+
+def get_changes(company_url: str) -> dict:
+    """Diff the two most recent snapshots for a company workspace."""
+    history = get_history(company_url)  # newest first
+    if len(history) < 2:
+        return {"has_prior": False}
+    curr, prev = history[0], history[1]
+    return {
+        "has_prior": True,
+        "from_date": prev["created_at"],
+        "to_date": curr["created_at"],
+        "diff": diff_analyses(prev["analysis"], curr["analysis"]),
+    }
+
+
 def list_companies() -> list[dict]:
     """One row per company with its latest timestamp and snapshot count."""
     pipeline = [

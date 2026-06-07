@@ -34,6 +34,27 @@ interface Snapshot {
   analysis: MarketAnalysis
 }
 
+interface PricingChange {
+  name: string
+  from?: string
+  to?: string
+}
+
+interface ChangeDiff {
+  competitors_added: Competitor[]
+  competitors_removed: Competitor[]
+  pricing_changed: PricingChange[]
+  prospects_added: Prospect[]
+  prospects_removed: Prospect[]
+}
+
+interface ChangesResponse {
+  has_prior: boolean
+  from_date?: string
+  to_date?: string
+  diff?: ChangeDiff
+}
+
 function formatSnapshotTime(iso: string): string {
   const d = new Date(iso)
   return d.toLocaleString(undefined, {
@@ -260,6 +281,78 @@ function ProspectRow({
   )
 }
 
+function ChangeLine({
+  tone,
+  label,
+  value,
+}: {
+  tone: 'add' | 'remove' | 'change'
+  label: string
+  value: string
+}) {
+  const sym = tone === 'add' ? '+' : tone === 'remove' ? '−' : '±'
+  const color =
+    tone === 'add' ? 'text-green-700' : tone === 'remove' ? 'text-red-600' : 'text-tan'
+  return (
+    <div className="flex gap-2.5 items-baseline">
+      <span className={`${color} font-semibold shrink-0 w-3`}>{sym}</span>
+      <span className="text-charcoal/50 text-xs uppercase tracking-wide shrink-0 w-40">
+        {label}
+      </span>
+      <span className="text-charcoal/90">{value}</span>
+    </div>
+  )
+}
+
+function ChangesPanel({ changes }: { changes: ChangesResponse }) {
+  if (!changes.has_prior || !changes.diff) return null
+  const d = changes.diff
+  const total =
+    d.competitors_added.length +
+    d.competitors_removed.length +
+    d.pricing_changed.length +
+    d.prospects_added.length +
+    d.prospects_removed.length
+
+  return (
+    <section>
+      <h2 className="text-xs font-semibold uppercase tracking-widest text-tan mb-3">
+        What changed
+        {changes.from_date && (
+          <span className="ml-2 text-charcoal/40 normal-case tracking-normal font-normal">
+            since your run on {formatSnapshotTime(changes.from_date)}
+          </span>
+        )}
+      </h2>
+      <div className="bg-white border border-cream-dark rounded-lg px-5 py-4 flex flex-col gap-2.5">
+        {total === 0 && (
+          <p className="text-sm text-charcoal/60">No changes since the last analysis.</p>
+        )}
+        {d.competitors_added.map((c, i) => (
+          <ChangeLine key={`ca${i}`} tone="add" label="New competitor" value={c.name} />
+        ))}
+        {d.competitors_removed.map((c, i) => (
+          <ChangeLine key={`cr${i}`} tone="remove" label="Competitor dropped" value={c.name} />
+        ))}
+        {d.pricing_changed.map((p, i) => (
+          <ChangeLine
+            key={`pc${i}`}
+            tone="change"
+            label={`Pricing · ${p.name}`}
+            value={`${p.from ?? '—'} → ${p.to ?? '—'}`}
+          />
+        ))}
+        {d.prospects_added.map((p, i) => (
+          <ChangeLine key={`pa${i}`} tone="add" label="New prospect" value={p.company_name} />
+        ))}
+        {d.prospects_removed.map((p, i) => (
+          <ChangeLine key={`pr${i}`} tone="remove" label="Prospect dropped" value={p.company_name} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
 function Spinner() {
   return (
     <div className="flex items-center gap-3 text-tan">
@@ -280,6 +373,7 @@ export default function Home() {
   const [history, setHistory] = useState<Snapshot[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<Record<string, Decision>>({})
+  const [changes, setChanges] = useState<ChangesResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const competitorKey = (c: Competitor) => `competitor:${c.url || c.name}`
@@ -303,6 +397,12 @@ export default function Home() {
       map[`${r.item_type}:${r.item_key}`] = r.decision
     }
     setFeedback(map)
+  }
+
+  async function loadChanges(companyUrl: string) {
+    const res = await fetch(`/api/changes?url=${encodeURIComponent(companyUrl)}`)
+    if (!res.ok) return
+    setChanges((await res.json()) as ChangesResponse)
   }
 
   async function sendFeedback(
@@ -345,6 +445,7 @@ export default function Home() {
     setResult(null)
     setHistory([])
     setSelectedId(null)
+    setChanges(null)
     setError(null)
 
     try {
@@ -361,10 +462,11 @@ export default function Home() {
       setResult(await res.json())
 
       // The snapshot was just saved server-side — load the company's full
-      // timeline and any prior keep/dismiss feedback for this workspace.
+      // timeline, prior feedback, and what changed since the last run.
       const [snaps] = await Promise.all([
         loadHistory(url.trim()),
         loadFeedback(url.trim()),
+        loadChanges(url.trim()),
       ])
       setHistory(snaps)
       if (snaps.length > 0) setSelectedId(snaps[0].id)
@@ -417,6 +519,9 @@ export default function Home() {
 
           {result && (
             <div className="flex flex-col gap-10">
+
+              {/* What changed since last run */}
+              {changes && <ChangesPanel changes={changes} />}
 
               {/* Workspace history timeline */}
               {history.length > 0 && (
