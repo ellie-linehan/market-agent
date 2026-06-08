@@ -36,10 +36,9 @@ Notes:
 The browser calls the Cloud Run backend **directly** (not through a Next proxy), so the ~60s `/analyze` request isn't killed by a serverless timeout. CORS is handled on the backend.
 
 1. Import the GitHub repo in Netlify ("Add new site → Import an existing project").
-2. **Base directory:** `market-agent/frontend`.
-3. **Build command:** `npm run build` · **Publish directory:** `market-agent/frontend/.next` (the `@netlify/plugin-nextjs` runtime is auto-detected).
-4. **Environment variable:** `NEXT_PUBLIC_BACKEND_URL = https://<your-cloud-run-url>` (no trailing slash). This is baked at build time, so set it before/redeploy after building.
-5. Deploy. Open the Netlify URL — this is your **hosted project URL** for the submission.
+2. **Base directory:** `market-agent/frontend`. Leave **build command** and **publish directory** blank — `market-agent/frontend/netlify.toml` sets them (`npm run build`, publish `.next`, and the `@netlify/plugin-nextjs` runtime). Setting publish manually here on top of the base dir doubles the path → 404.
+3. **Environment variable:** `NEXT_PUBLIC_BACKEND_URL = https://<your-cloud-run-url>` (no trailing slash). This is baked at build time, so set it before the first build (or redeploy after adding it).
+4. Deploy. Open the Netlify URL — this is your **hosted project URL** for the submission.
 
 > Local dev: `NEXT_PUBLIC_BACKEND_URL` defaults to `http://localhost:8000`, so `npm run dev` + the local backend just work.
 

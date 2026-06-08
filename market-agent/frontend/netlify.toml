@@ -1,0 +1,8 @@
+# Set the Netlify site's "Base directory" to market-agent/frontend.
+# Paths below are relative to that base.
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
