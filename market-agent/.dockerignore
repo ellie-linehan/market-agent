@@ -1,0 +1,24 @@
+# secrets — never bake into the image
+.env
+.env.*
+!.env.example
+
+# python
+.venv
+**/__pycache__
+*.pyc
+
+# node / frontend (deployed separately)
+frontend/node_modules
+frontend/.next
+frontend/out
+
+# adk / local runtime
+.adk
+.claude
+
+# vcs / misc
+.git
+.gitignore
+*.png
+tests
