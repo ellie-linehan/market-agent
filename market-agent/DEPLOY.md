@@ -26,17 +26,21 @@ gcloud run deploy market-agent-api \
 
 Notes:
 - `--min-instances 1` keeps the Phoenix MCP connection pre-warmed (no cold-start on the demo).
+- `CORS_ALLOW_ORIGINS` defaults to `*` (fine for the demo — no cookies/credentials). Optionally tighten it to your Netlify URL after step 2 by redeploying with `CORS_ALLOW_ORIGINS=https://<your-site>.netlify.app`.
 - For real secret hygiene, put `GOOGLE_API_KEY` / `MONGODB_URI` / `PHOENIX_API_KEY` in Secret Manager and use `--set-secrets` instead of `--set-env-vars`.
 - Note the service URL it prints (e.g. `https://market-agent-api-xxxx.run.app`).
 - Smoke test: `curl https://<service-url>/health` → `{"status":"ok"}`.
 
-## 2. Frontend → Vercel
-The frontend only talks to its own `/api/*` routes (which proxy to the backend server-side), so there's no CORS to configure.
+## 2. Frontend → Netlify
+The browser calls the Cloud Run backend **directly** (not through a Next proxy), so the ~60s `/analyze` request isn't killed by a serverless timeout. CORS is handled on the backend.
 
-1. Import the GitHub repo in Vercel.
-2. **Root Directory:** `market-agent/frontend`.
-3. **Environment variable:** `FASTAPI_URL = https://<your-cloud-run-url>`.
-4. Deploy. Open the Vercel URL — this is your **hosted project URL** for the submission.
+1. Import the GitHub repo in Netlify ("Add new site → Import an existing project").
+2. **Base directory:** `market-agent/frontend`.
+3. **Build command:** `npm run build` · **Publish directory:** `market-agent/frontend/.next` (the `@netlify/plugin-nextjs` runtime is auto-detected).
+4. **Environment variable:** `NEXT_PUBLIC_BACKEND_URL = https://<your-cloud-run-url>` (no trailing slash). This is baked at build time, so set it before/redeploy after building.
+5. Deploy. Open the Netlify URL — this is your **hosted project URL** for the submission.
+
+> Local dev: `NEXT_PUBLIC_BACKEND_URL` defaults to `http://localhost:8000`, so `npm run dev` + the local backend just work.
 
 ## 3. Before submitting
 - Make the repo public: `gh repo edit ellie-linehan/market-agent --visibility public --accept-visibility-change-consequences`

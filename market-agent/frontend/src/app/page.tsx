@@ -2,6 +2,11 @@
 
 import { useState, FormEvent } from 'react'
 
+// The browser calls the backend (Cloud Run) directly — no Next.js proxy — so the
+// ~60s /analyze request isn't killed by a serverless function timeout.
+// Set NEXT_PUBLIC_BACKEND_URL in Netlify; defaults to localhost for dev.
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+
 interface Competitor {
   name: string
   url: string
@@ -407,14 +412,14 @@ export default function Home() {
   const currentEval = history.find(s => s.id === selectedId)?.eval ?? null
 
   async function loadHistory(companyUrl: string): Promise<Snapshot[]> {
-    const res = await fetch(`/api/company?url=${encodeURIComponent(companyUrl)}`)
+    const res = await fetch(`${BACKEND}/company?url=${encodeURIComponent(companyUrl)}`)
     if (!res.ok) return []
     const data = await res.json()
     return (data.history ?? []) as Snapshot[]
   }
 
   async function loadFeedback(companyUrl: string) {
-    const res = await fetch(`/api/feedback?url=${encodeURIComponent(companyUrl)}`)
+    const res = await fetch(`${BACKEND}/feedback?url=${encodeURIComponent(companyUrl)}`)
     if (!res.ok) return
     const data = await res.json()
     const map: Record<string, Decision> = {}
@@ -425,7 +430,7 @@ export default function Home() {
   }
 
   async function loadChanges(companyUrl: string) {
-    const res = await fetch(`/api/changes?url=${encodeURIComponent(companyUrl)}`)
+    const res = await fetch(`${BACKEND}/changes?url=${encodeURIComponent(companyUrl)}`)
     if (!res.ok) return
     setChanges((await res.json()) as ChangesResponse)
   }
@@ -445,7 +450,7 @@ export default function Home() {
       else delete copy[mapKey]
       return copy
     })
-    await fetch('/api/feedback', {
+    await fetch(`${BACKEND}/feedback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -474,10 +479,10 @@ export default function Home() {
     setError(null)
 
     try {
-      const res = await fetch('/api/analyze', {
+      const res = await fetch(`${BACKEND}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify({ company_url: url.trim() }),
       })
       if (!res.ok) {
         const data = await res.json()

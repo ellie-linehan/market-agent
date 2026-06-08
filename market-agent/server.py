@@ -1,7 +1,9 @@
 import asyncio
+import os
 import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -38,6 +40,17 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="B2B Market Intelligence Agent", lifespan=lifespan)
+
+# The Netlify frontend calls this backend directly (browser → Cloud Run) to avoid
+# serverless function timeouts on the ~60s /analyze. Allow its origin.
+# CORS_ALLOW_ORIGINS = comma-separated origins, or "*" (default).
+_origins = os.environ.get("CORS_ALLOW_ORIGINS", "*")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"] if _origins == "*" else [o.strip() for o in _origins.split(",")],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class AnalyzeRequest(BaseModel):
