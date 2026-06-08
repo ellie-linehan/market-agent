@@ -27,11 +27,35 @@ interface MarketAnalysis {
   market_summary: string
 }
 
+interface Evaluation {
+  score: number
+  label: string
+  reason: string
+}
+
 interface Snapshot {
   id: string
   created_at: string
   company_name: string
   analysis: MarketAnalysis
+  eval?: Evaluation | null
+}
+
+function GroundingBadge({ evaluation }: { evaluation: Evaluation }) {
+  const tone =
+    evaluation.label === 'grounded'
+      ? 'bg-green-50 border-green-200 text-green-700'
+      : evaluation.label === 'partial'
+      ? 'bg-amber-50 border-amber-200 text-amber-700'
+      : 'bg-red-50 border-red-200 text-red-700'
+  return (
+    <span
+      title={evaluation.reason}
+      className={`text-xs px-2 py-0.5 rounded-full border ${tone}`}
+    >
+      Grounding {evaluation.score.toFixed(2)} · {evaluation.label}
+    </span>
+  )
 }
 
 interface PricingChange {
@@ -380,6 +404,7 @@ export default function Home() {
   const prospectKey = (p: Prospect) => `prospect:${p.website || p.company_name}`
   const keptCount = Object.values(feedback).filter(d => d === 'keep').length
   const dismissedCount = Object.values(feedback).filter(d => d === 'dismiss').length
+  const currentEval = history.find(s => s.id === selectedId)?.eval ?? null
 
   async function loadHistory(companyUrl: string): Promise<Snapshot[]> {
     const res = await fetch(`/api/company?url=${encodeURIComponent(companyUrl)}`)
@@ -569,9 +594,12 @@ export default function Home() {
 
               {/* Summary */}
               <section>
-                <h2 className="text-xs font-semibold uppercase tracking-widest text-tan mb-3">
-                  Market Summary — {result.company}
-                </h2>
+                <div className="flex items-center gap-3 mb-3 flex-wrap">
+                  <h2 className="text-xs font-semibold uppercase tracking-widest text-tan">
+                    Market Summary — {result.company}
+                  </h2>
+                  {currentEval && <GroundingBadge evaluation={currentEval} />}
+                </div>
                 <SummaryBlock text={result.market_summary} />
               </section>
 

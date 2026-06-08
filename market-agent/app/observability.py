@@ -31,6 +31,18 @@ def setup_phoenix() -> None:
     )
 
 
+def log_eval(name: str, company: str, score: float, label: str, reason: str) -> None:
+    """Emit an LLM-as-judge eval result as a span so it lands in Phoenix
+    alongside the agent traces."""
+    tracer = trace.get_tracer("market-agent.eval")
+    with tracer.start_as_current_span(f"eval.{name}") as span:
+        span.set_attribute("eval.name", name)
+        span.set_attribute("eval.company", company)
+        span.set_attribute("eval.score", score)
+        span.set_attribute("eval.label", label)
+        span.set_attribute("eval.explanation", reason)
+
+
 def log_feedback(
     company: str, item_type: str, item_key: str, item_label: str, decision: str
 ) -> None:

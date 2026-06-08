@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-from app import store, insights
-from app.observability import log_feedback
+from app import store, insights, evals
+from app.observability import log_feedback, log_eval
 from app.agent import root_agent, MarketAnalysis
 from google.adk.runners import InMemoryRunner
 from google.genai import types
@@ -88,7 +88,37 @@ async def analyze(req: AnalyzeRequest) -> MarketAnalysis:
         raise HTTPException(status_code=500, detail="No analysis produced")
 
     analysis = MarketAnalysis.model_validate_json(final)
-    await asyncio.to_thread(store.save_snapshot, req.company_url, analysis.model_dump())
+
+    # LLM-as-judge groundedness eval (best-effort): score the analysis against
+    # the profiler's verified company profile, log it to Phoenix, store on snapshot.
+    evaluation = None
+    try:
+        session = await _runner.session_service.get_session(
+            app_name=_APP_NAME, user_id="web", session_id=session_id
+        )
+        profile = (session.state.get("profile") if session else "") or ""
+        if profile:
+            result = await asyncio.to_thread(
+                evals.grounded_score,
+                profile,
+                analysis.company,
+                [c.name for c in analysis.competitors],
+                analysis.market_summary,
+            )
+            evaluation = result.model_dump()
+            log_eval(
+                "groundedness",
+                analysis.company,
+                result.score,
+                result.label,
+                result.reason,
+            )
+    except Exception:  # noqa: BLE001 - eval is best-effort, never break analysis
+        evaluation = None
+
+    await asyncio.to_thread(
+        store.save_snapshot, req.company_url, analysis.model_dump(), evaluation
+    )
     return analysis
 
 

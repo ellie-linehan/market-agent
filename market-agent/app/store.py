@@ -24,7 +24,9 @@ def company_key(url: str) -> str:
     return k.rstrip("/")
 
 
-def save_snapshot(company_url: str, analysis: dict) -> dict:
+def save_snapshot(
+    company_url: str, analysis: dict, evaluation: dict | None = None
+) -> dict:
     """Append one analysis snapshot for a company. Returns the stored snapshot."""
     doc = {
         "company_key": company_key(company_url),
@@ -32,6 +34,7 @@ def save_snapshot(company_url: str, analysis: dict) -> dict:
         "company_name": analysis.get("company") or company_key(company_url),
         "created_at": datetime.now(timezone.utc),
         "analysis": analysis,
+        "eval": evaluation,
     }
     result = _db().analyses.insert_one(doc)
     return {
@@ -40,6 +43,7 @@ def save_snapshot(company_url: str, analysis: dict) -> dict:
         "company_url": doc["company_url"],
         "company_name": doc["company_name"],
         "analysis": analysis,
+        "eval": evaluation,
     }
 
 
@@ -55,6 +59,7 @@ def get_history(company_url: str) -> list[dict]:
             "company_url": d.get("company_url"),
             "company_name": d.get("company_name"),
             "analysis": d["analysis"],
+            "eval": d.get("eval"),
         }
         for d in cursor
     ]
