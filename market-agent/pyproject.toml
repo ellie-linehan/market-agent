@@ -12,7 +12,8 @@ dependencies = [
     "pymongo>=4.7.0",
     "python-dotenv>=1.0.0",
     "graphviz>=0.21",
-    "arize-otel>=0.13.0",
+    "arize-phoenix-otel>=0.16.1",
+    "openinference-instrumentation-google-adk>=0.1.15",
 ]
 requires-python = ">=3.11,<3.14"
 

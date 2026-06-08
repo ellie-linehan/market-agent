@@ -1,12 +1,13 @@
 import asyncio
 import uuid
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-from app import store
+from app import store, insights
 from app.observability import log_feedback
 from app.agent import root_agent, MarketAnalysis
 from google.adk.runners import InMemoryRunner
@@ -14,8 +15,29 @@ from google.genai import types
 
 _APP_NAME = "market-agent"
 _runner = InMemoryRunner(agent=root_agent, app_name=_APP_NAME)
+_insights_runner: InMemoryRunner | None = None
 
-app = FastAPI(title="B2B Market Intelligence Agent")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Pre-warm the Phoenix MCP connection at boot so the first /insights call
+    doesn't pay the npx cold-start race. Never blocks startup on failure."""
+    global _insights_runner
+    if insights.phoenix_configured():
+        try:
+            runner = InMemoryRunner(
+                agent=insights.build_insights_agent(), app_name="insights"
+            )
+            # spawn npx + complete the MCP handshake now (slow boot is fine)
+            await asyncio.wait_for(runner.agent.tools[0].get_tools(), timeout=90)
+            _insights_runner = runner
+            print("[insights] Phoenix MCP pre-warmed")
+        except Exception as e:  # noqa: BLE001 - degrade to lazy init on the endpoint
+            print(f"[insights] Phoenix MCP pre-warm skipped: {e}")
+    yield
+
+
+app = FastAPI(title="B2B Market Intelligence Agent", lifespan=lifespan)
 
 
 class AnalyzeRequest(BaseModel):
@@ -87,6 +109,57 @@ async def companies():
 async def changes(url: str):
     """What changed between the two most recent analyses of a company."""
     return await asyncio.to_thread(store.get_changes, url)
+
+
+class InsightsRequest(BaseModel):
+    question: str
+
+
+@app.post("/insights")
+async def insights_endpoint(req: InsightsRequest):
+    """Ask the agent to introspect its own telemetry via the Phoenix MCP server."""
+    global _insights_runner
+    if not insights.phoenix_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="Phoenix not configured (set PHOENIX_API_KEY and PHOENIX_COLLECTOR_ENDPOINT).",
+        )
+    msg = types.Content(role="user", parts=[types.Part(text=req.question)])
+
+    async def _run(runner: InMemoryRunner) -> str:
+        session_id = uuid.uuid4().hex
+        await runner.session_service.create_session(
+            app_name="insights", user_id="web", session_id=session_id
+        )
+        answer = ""
+        async for ev in runner.run_async(
+            user_id="web", session_id=session_id, new_message=msg
+        ):
+            if ev.content and ev.content.parts:
+                for part in ev.content.parts:
+                    if getattr(part, "text", None):
+                        answer = part.text
+        return answer
+
+    # MCP-over-stdio is intermittently flaky on Windows (cold-start races, and
+    # pipe-buffer hangs on larger responses). Bound each attempt with a timeout
+    # and retry once with a fresh runner so the endpoint never stalls.
+    last_err: Exception | None = None
+    for _ in range(2):
+        if _insights_runner is None:
+            _insights_runner = InMemoryRunner(
+                agent=insights.build_insights_agent(), app_name="insights"
+            )
+        try:
+            answer = await asyncio.wait_for(_run(_insights_runner), timeout=60)
+            return {"answer": answer}
+        except Exception as e:  # noqa: BLE001 - incl. TimeoutError; retry fresh
+            last_err = e
+            _insights_runner = None
+
+    raise HTTPException(
+        status_code=504, detail=f"Phoenix MCP call timed out / failed: {last_err}"
+    )
 
 
 @app.post("/feedback")

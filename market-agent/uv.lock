@@ -164,8 +164,8 @@ wheels = [
 ]
 
 [[package]]
-name = "arize-otel"
-version = "0.13.0"
+name = "arize-phoenix-otel"
+version = "0.16.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "openinference-instrumentation" },
@@ -173,10 +173,13 @@ dependencies = [
     { name = "opentelemetry-exporter-otlp" },
     { name = "opentelemetry-proto" },
     { name = "opentelemetry-sdk" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "typing-extensions" },
+    { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/70/e318acceb6d7807a376ac126bde32bd9457ddf7a525fdcd629d9672f1bcb/arize_otel-0.13.0.tar.gz", hash = "sha256:6ccd1e26be23a52a0dad2798c924036e2c73a0db086a2214c2817fcfa36a31e6", size = 16799, upload-time = "2026-05-27T20:14:56.61Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/37/97/5aef2776ee17eacb24a82de719312008ca0a16b915415cc9363a9a9b1536/arize_phoenix_otel-0.16.1.tar.gz", hash = "sha256:28ba1d43dcd2dc556f6cac25622c3333e613e2cf1d687832a9ed5ce2c20e17be", size = 20933, upload-time = "2026-05-03T19:07:02.563Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/21/8e/2e067e00f27aba8999dd610dada7c119d728a545b32d5381fe7898b32bb4/arize_otel-0.13.0-py3-none-any.whl", hash = "sha256:1748b42d432c6b8013200e62804baa20b0e471a074b1cfe573a9bd0026f6515b", size = 17745, upload-time = "2026-05-27T20:14:55.321Z" },
+    { url = "https://files.pythonhosted.org/packages/ee/2e/e495446a8a715d9892a4dbc56e11b18fb6f07a634182babc0b0ac6827d9c/arize_phoenix_otel-0.16.1-py3-none-any.whl", hash = "sha256:eb71f7be8d94e68f5cd82b134f7ea1710fa73374bf0d8d663ce6242332871ff9", size = 18033, upload-time = "2026-05-03T19:07:01.395Z" },
 ]
 
 [[package]]
@@ -1639,10 +1642,11 @@ name = "market-agent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "arize-otel" },
+    { name = "arize-phoenix-otel" },
     { name = "gcsfs" },
     { name = "google-adk" },
     { name = "graphviz" },
+    { name = "openinference-instrumentation-google-adk" },
     { name = "opentelemetry-instrumentation-google-genai" },
     { name = "pymongo" },
     { name = "python-dotenv" },
@@ -1667,12 +1671,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arize-otel", specifier = ">=0.13.0" },
+    { name = "arize-phoenix-otel", specifier = ">=0.16.1" },
     { name = "codespell", marker = "extra == 'lint'", specifier = ">=2.2.0,<3.0.0" },
     { name = "gcsfs", specifier = ">=2024.11.0" },
     { name = "google-adk", specifier = ">=1.15.0,<2.0.0" },
     { name = "google-adk", extras = ["eval"], marker = "extra == 'eval'", specifier = ">=1.15.0,<2.0.0" },
     { name = "graphviz", specifier = ">=0.21" },
+    { name = "openinference-instrumentation-google-adk", specifier = ">=0.1.15" },
     { name = "opentelemetry-instrumentation-google-genai", specifier = ">=0.1.0,<1.0.0" },
     { name = "pymongo", specifier = ">=4.7.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
@@ -2039,6 +2044,24 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f9/b6/c0e7e047ae4962f2755a3bc9141fdd6272c75c74e47dfc6aa71978a9b78f/openinference_instrumentation-0.1.53.tar.gz", hash = "sha256:3c0c145cf6e13cfa630b29d0e3ca806f3821470ffca7922f1590e3970fadd4da", size = 33712, upload-time = "2026-06-02T16:37:21.771Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/13/bb/01262d9945c476e15aa21bb9ca05b18604e525d73d9761cadb677f485198/openinference_instrumentation-0.1.53-py3-none-any.whl", hash = "sha256:f43695080eded47b1e03ff1b19cb5c23ea4409459cfe16c5b5748d5656832eb1", size = 40958, upload-time = "2026-06-02T16:37:20.69Z" },
+]
+
+[[package]]
+name = "openinference-instrumentation-google-adk"
+version = "0.1.15"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "openinference-instrumentation" },
+    { name = "openinference-semantic-conventions" },
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "typing-extensions" },
+    { name = "wrapt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1b/1a/f35f3f38dba763e3ab41a73c15125de6107b3dd1aacbff50201b945e7d89/openinference_instrumentation_google_adk-0.1.15.tar.gz", hash = "sha256:1c0c73ad3b128858486f2066ceba3690061cbb8755bcd97a58220d9a5a42cf8e", size = 14739, upload-time = "2026-05-22T21:10:48.449Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/24/dbddd058a5b837c5f50a42dd94b4d9e338dc362c3cf067a6620c18a7f5c3/openinference_instrumentation_google_adk-0.1.15-py3-none-any.whl", hash = "sha256:be6db6bb68922acae5103bbb72fda9b880a809309b49289fa23d685742de8ebe", size = 16661, upload-time = "2026-05-22T21:10:46.054Z" },
 ]
 
 [[package]]

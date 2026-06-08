@@ -10,8 +10,8 @@ from pydantic import BaseModel
 
 load_dotenv(override=True)
 
-from app.observability import setup_arize
-setup_arize()
+from app.observability import setup_phoenix
+setup_phoenix()
 
 _model = Gemini(
     model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
