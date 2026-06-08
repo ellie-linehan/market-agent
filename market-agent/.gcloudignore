@@ -1,0 +1,12 @@
+# Only the backend build context is needed for Cloud Run.
+.git
+.venv
+**/__pycache__
+*.pyc
+.env
+.env.*
+.adk
+.claude
+frontend
+tests
+*.png

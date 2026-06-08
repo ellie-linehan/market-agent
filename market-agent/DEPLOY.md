@@ -27,6 +27,7 @@ gcloud run deploy market-agent-api \
 Notes:
 - `--min-instances 1` keeps the Phoenix MCP connection pre-warmed (no cold-start on the demo).
 - `CORS_ALLOW_ORIGINS` defaults to `*` (fine for the demo — no cookies/credentials). Optionally tighten it to your Netlify URL after step 2 by redeploying with `CORS_ALLOW_ORIGINS=https://<your-site>.netlify.app`.
+- Do **not** wrap env values in quotes (e.g. `PHOENIX_COLLECTOR_ENDPOINT='https://...'`). Cloud Run keeps quotes literal, which breaks the URL; `python-dotenv` strips them locally so it only bites in deploy.
 - For real secret hygiene, put `GOOGLE_API_KEY` / `MONGODB_URI` / `PHOENIX_API_KEY` in Secret Manager and use `--set-secrets` instead of `--set-env-vars`.
 - Note the service URL it prints (e.g. `https://market-agent-api-xxxx.run.app`).
 - Smoke test: `curl https://<service-url>/health` → `{"status":"ok"}`.
