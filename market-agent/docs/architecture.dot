@@ -1,0 +1,42 @@
+digraph architecture {
+  rankdir=TB; fontname="Helvetica"; bgcolor="#f4f1ea"; pad=0.4; nodesep=0.4; ranksep=0.55;
+  node [fontname="Helvetica", fontsize=11, shape=box, style="filled,rounded", color="#d9d2c3", fillcolor="white", fontcolor="#2b2b2b", margin="0.18,0.10"];
+  edge [fontname="Helvetica", fontsize=9, color="#9b8f7a", fontcolor="#6b6256"];
+
+  user [label="Founder / GTM lead", shape=oval, fillcolor="#2b2b2b", fontcolor="#f4f1ea", color="#2b2b2b"];
+
+  subgraph cluster_be {
+    label="Backend — FastAPI on Cloud Run  ·  Google ADK  ·  Gemini 3.5 Flash";
+    labeljust="l"; fontname="Helvetica-Bold"; fontsize=11; fontcolor="#9a8c6a"; color="#d9d2c3"; style="rounded"; bgcolor="#fbf9f4";
+    profiler [label="1 · profiler_agent\nfetch site → grounded profile"];
+    competitive [label="competitive_agent"];
+    icp [label="icp_agent"];
+    synth [label="3 · synthesizer\n→ MarketAnalysis (JSON)", fillcolor="#efe9da"];
+    profiler -> competitive [label="2 · parallel"];
+    profiler -> icp;
+    competitive -> synth; icp -> synth;
+  }
+
+  ws [label="Curated workspace (Next.js / Netlify)\nShortlist + Candidates", fillcolor="#ffffff"];
+  mongo [label="MongoDB\ncurated items:\nkept | candidate | dismissed", shape=cylinder, fillcolor="#eae3d2"];
+
+  subgraph cluster_arize {
+    label="Arize Phoenix — evaluation & improvement engine";
+    labeljust="l"; fontname="Helvetica-Bold"; fontsize=11; fontcolor="#a07b1e"; color="#c9a227"; style="rounded"; bgcolor="#fbf6e6";
+    trace [label="OpenInference traces"];
+    evals [label="evals:\ngroundedness + usefulness", fillcolor="#fdf3d6"];
+    mcp [label="/insights\nvia Phoenix MCP"];
+  }
+
+  user -> ws;
+  ws -> profiler [label="POST /analyze"];
+  synth -> mongo [label="MERGE (dedupe)"];
+  mongo -> ws [label="curated view"];
+  ws -> mongo [label="keep / dismiss → status"];
+  ws -> evals [label="keep/dismiss → annotation"];
+  synth -> trace [label="every run"];
+  synth -> evals [label="groundedness"];
+  evals -> competitive [label="LEARN — next-scan preferences\nread back from Phoenix", style="bold,dashed", color="#c9a227", fontcolor="#a07b1e"];
+  mongo -> competitive [label="fallback (freshness)", style="dotted"];
+  evals -> mcp [style=invis];
+}

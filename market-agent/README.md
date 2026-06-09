@@ -17,6 +17,8 @@ Built for the Google Cloud Rapid Agent Hackathon (Arize track). Powered by **Gem
 
 ## Architecture
 
+![Architecture — ADK agent pipeline, the curated workspace, and Arize Phoenix as the evaluation & improvement engine](docs/architecture.png)
+
 ### Agent map — the ADK pipeline
 
 ```
