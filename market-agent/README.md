@@ -8,7 +8,7 @@ Built for the Google Cloud Rapid Agent Hackathon (Arize track). Powered by **Gem
 
 ## What it does
 
-- **Grounded analysis.** A profiler agent fetches the company's site and pins down its real identity *before* any analysis runs — so `ptg-usa.com` is correctly read as *Pension Technology Group* (pension software), not guessed from the domain.
+- **Grounded analysis.** A profiler agent fetches the company's site and pins down its real identity *before* any analysis runs — identified from what the homepage actually says, not guessed from the domain or an ambiguous abbreviation.
 - **Competitors + ICP prospects** in one pass: positioning, target segment, pricing, and real prospect companies with concrete match reasons.
 - **An accumulating workspace, not a one-shot report.** Re-scans *merge* into a persistent, deduped set. You **Keep** (pin to a shortlist) or **Dismiss** (hide) any item; anything you don't touch stays a candidate — nothing silently vanishes.
 - **It learns your judgment.** Your Keep/Dismiss shapes future scans — and that learning signal is read back **from Arize Phoenix**, where it's also evaluated and measured.

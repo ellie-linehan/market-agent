@@ -90,8 +90,9 @@ def fetch_company_website(url: str) -> str:
 
 
 # Step 1: establish company identity ONCE, grounded in the fetched site.
-# This is the fix for domain-name hallucination (e.g. "PTG" -> machining vs. pension software):
-# downstream agents read this profile instead of re-interpreting the raw URL.
+# Fixes domain-name hallucination: an ambiguous domain or abbreviation can be
+# misread as the wrong industry, so downstream agents read this grounded profile
+# instead of re-interpreting the raw URL.
 profiler_agent = Agent(
     name="profiler_agent",
     model=_model,
@@ -133,7 +134,7 @@ Identify the top 5 direct competitors of THIS company as described in the profil
 For each competitor be precise — no vague marketing language:
 - name and url
 - positioning: their core differentiator in one sentence
-- target_segment: the specific buyer profile (e.g. "mid-size US public pension funds, 10k-100k members") — not just "enterprise" or "SMB"
+- target_segment: the specific buyer profile (e.g. "Series B-D fintechs, 50-500 engineers") — not just "enterprise" or "SMB"
 - key_features: 3-5 features that actually set them apart from the field
 - pricing_model: real tiers and numbers where known; write "undisclosed" only if genuinely unknown
 

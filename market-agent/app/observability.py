@@ -31,6 +31,53 @@ def setup_phoenix() -> None:
     )
 
 
+_px_client = None
+
+
+def flush_traces() -> None:
+    """Push buffered spans to Phoenix so they can be annotated by span_id."""
+    try:
+        provider = trace.get_tracer_provider()
+        if hasattr(provider, "force_flush"):
+            provider.force_flush()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def annotate_span(
+    span_id: str,
+    name: str,
+    *,
+    label: str | None = None,
+    score: float | None = None,
+    explanation: str | None = None,
+    kind: str = "CODE",
+) -> None:
+    """Attach an eval / feedback annotation to an existing span so it shows in
+    Phoenix's Annotations tab (the Arize-native view). Best-effort."""
+    global _px_client
+    if not span_id or not os.environ.get("PHOENIX_API_KEY"):
+        return
+    try:
+        if _px_client is None:
+            from phoenix.client import Client
+
+            _px_client = Client(
+                base_url=os.environ["PHOENIX_COLLECTOR_ENDPOINT"],
+                api_key=os.environ["PHOENIX_API_KEY"],
+            )
+        _px_client.spans.add_span_annotation(
+            span_id=span_id,
+            annotation_name=name,
+            annotator_kind=kind,
+            label=label,
+            score=score,
+            explanation=explanation,
+        )
+    except Exception:  # noqa: BLE001 - never break the request on observability
+        pass
+
+
 def log_eval(
     name: str, tenant_id: str, company: str, score: float, label: str, reason: str
 ) -> None:

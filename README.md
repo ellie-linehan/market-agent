@@ -15,7 +15,7 @@ Built for the **Google Cloud Rapid Agent Hackathon** (Arize track) on **Gemini 3
 
 Give it a B2B company URL and it maps the competitive landscape and surfaces ICP-matched prospects in one pass — then it becomes a workspace that gets sharper every time you use it:
 
-- **Grounded, not guessed** — a profiler agent reads the actual site first, so `ptg-usa.com` is correctly read as *Pension Technology Group* (pension software), not inferred from the domain.
+- **Grounded, not guessed** — a profiler agent reads the actual site first, so a company is identified from what its homepage says, not inferred from its domain or an ambiguous abbreviation (which can match several unrelated industries).
 - **Accumulate-and-curate** — re-scans *merge* into a persistent, deduped set. **Keep** pins to a shortlist, **Dismiss** hides, untouched items stay candidates. Nothing silently vanishes.
 - **Learns your judgment** — your Keep/Dismiss shapes future scans, read back from Phoenix.
 - **Trustworthy** — every analysis gets an LLM-as-judge groundedness score; the badge only warns when something's off.

@@ -20,7 +20,7 @@ def _db():
 
 
 def company_key(url: str) -> str:
-    """Normalize a URL so 'https://www.ptg-usa.com/' and 'ptg-usa.com' collide."""
+    """Normalize a URL so 'https://www.acme.com/' and 'acme.com' collide."""
     k = url.strip().lower()
     k = re.sub(r"^https?://", "", k)
     k = re.sub(r"^www\.", "", k)
@@ -28,7 +28,10 @@ def company_key(url: str) -> str:
 
 
 def save_snapshot(
-    company_url: str, analysis: dict, evaluation: dict | None = None
+    company_url: str,
+    analysis: dict,
+    evaluation: dict | None = None,
+    span_id: str | None = None,
 ) -> dict:
     """Append one analysis snapshot for a company. Returns the stored snapshot."""
     doc = {
@@ -38,6 +41,7 @@ def save_snapshot(
         "created_at": datetime.now(timezone.utc),
         "analysis": analysis,
         "eval": evaluation,
+        "span_id": span_id,
     }
     result = _db().analyses.insert_one(doc)
     return {
@@ -80,9 +84,8 @@ _NAME_PREFIXES = ("city of ", "town of ", "county of ")
 
 def _norm_name(s: str | None) -> str:
     """Normalize a company/entity name for identity matching, so naming variants
-    collide: 'LRS (PensionGold)' ~ 'LRS (Levi, Ray & Shoup)', 'Tegrit' ~ 'Tegrit
-    Group', 'City of Quincy Retirement System' ~ 'Quincy Retirement System',
-    'X & Y' ~ 'X and Y'."""
+    collide: 'Acme (Cloud)' ~ 'Acme (Hosted)', 'Globex' ~ 'Globex Group',
+    'City of Springfield Board' ~ 'Springfield Board', 'X & Y' ~ 'X and Y'."""
     s = (s or "").lower()
     s = re.sub(r"\([^)]*\)", " ", s)  # drop parentheticals
     s = re.sub(r"[^a-z0-9]+", " ", s)  # punctuation/& -> space
@@ -293,6 +296,17 @@ def keep_rate(tenant_id: str, company_url: str) -> dict:
     dismissed = _db().items.count_documents({**base, "status": "dismissed"})
     decided = kept + dismissed
     return {"kept": kept, "dismissed": dismissed, "keep_rate": (kept / decided) if decided else None}
+
+
+def latest_span_id(tenant_id: str, company_url: str) -> str | None:
+    """span_id of the most recent analysis run, so feedback can be annotated onto
+    that analysis trace in Phoenix."""
+    doc = _db().analyses.find_one(
+        {"company_key": company_key(company_url)},
+        sort=[("created_at", DESCENDING)],
+        projection={"span_id": 1},
+    )
+    return doc.get("span_id") if doc else None
 
 
 def list_companies() -> list[dict]:

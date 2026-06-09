@@ -9,11 +9,14 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-from app import store, insights, evals, learning
-from app.observability import log_feedback, log_eval
+from app import store, insights, evals, learning, observability
+from app.observability import log_feedback
 from app.agent import root_agent, MarketAnalysis
 from google.adk.runners import InMemoryRunner
 from google.genai import types
+from opentelemetry import trace as _otel
+
+_TRACER = _otel.get_tracer("market-agent.analyze")
 
 _APP_NAME = "market-agent"
 _runner = InMemoryRunner(agent=root_agent, app_name=_APP_NAME)
@@ -99,50 +102,61 @@ async def analyze(req: AnalyzeRequest):
         text = f"{req.company_url}\n{req.company_description}"
     msg = types.Content(role="user", parts=[types.Part(text=text)])
 
+    # Wrap the run in a span we own so we can attach evals/feedback as ANNOTATIONS
+    # on this analysis trace (the ADK pipeline spans nest under it).
     final = None
-    async for ev in _runner.run_async(
-        user_id="web", session_id=session_id, new_message=msg
-    ):
-        if ev.author == "synthesizer" and ev.content and ev.content.parts:
-            for part in ev.content.parts:
-                if getattr(part, "text", None):
-                    final = part.text
-
-    if not final:
-        raise HTTPException(status_code=500, detail="No analysis produced")
-
-    analysis = MarketAnalysis.model_validate_json(final)
-
-    # LLM-as-judge groundedness eval (best-effort): score the analysis against
-    # the profiler's verified company profile, log it to Phoenix, store on snapshot.
     evaluation = None
-    try:
-        session = await _runner.session_service.get_session(
-            app_name=_APP_NAME, user_id="web", session_id=session_id
+    with _TRACER.start_as_current_span("market_analysis") as a_span:
+        a_span.set_attribute("tenant.id", tenant)
+        a_span.set_attribute("company.url", req.company_url)
+        span_id = format(a_span.get_span_context().span_id, "016x")
+
+        async for ev in _runner.run_async(
+            user_id="web", session_id=session_id, new_message=msg
+        ):
+            if ev.author == "synthesizer" and ev.content and ev.content.parts:
+                for part in ev.content.parts:
+                    if getattr(part, "text", None):
+                        final = part.text
+
+        if not final:
+            raise HTTPException(status_code=500, detail="No analysis produced")
+
+        analysis = MarketAnalysis.model_validate_json(final)
+
+        # LLM-as-judge groundedness eval (best-effort).
+        try:
+            session = await _runner.session_service.get_session(
+                app_name=_APP_NAME, user_id="web", session_id=session_id
+            )
+            profile = (session.state.get("profile") if session else "") or ""
+            if profile:
+                result = await asyncio.to_thread(
+                    evals.grounded_score,
+                    profile,
+                    analysis.company,
+                    [c.name for c in analysis.competitors],
+                    analysis.market_summary,
+                )
+                evaluation = result.model_dump()
+        except Exception:  # noqa: BLE001 - eval is best-effort, never break analysis
+            evaluation = None
+
+    # Flush the span to Phoenix, then attach groundedness as an annotation on the
+    # analysis trace (populates Phoenix's Annotations tab).
+    observability.flush_traces()
+    if evaluation:
+        observability.annotate_span(
+            span_id,
+            "groundedness",
+            label=evaluation["label"],
+            score=evaluation["score"],
+            explanation=evaluation["reason"],
+            kind="LLM",
         )
-        profile = (session.state.get("profile") if session else "") or ""
-        if profile:
-            result = await asyncio.to_thread(
-                evals.grounded_score,
-                profile,
-                analysis.company,
-                [c.name for c in analysis.competitors],
-                analysis.market_summary,
-            )
-            evaluation = result.model_dump()
-            log_eval(
-                "groundedness",
-                tenant,
-                analysis.company,
-                result.score,
-                result.label,
-                result.reason,
-            )
-    except Exception:  # noqa: BLE001 - eval is best-effort, never break analysis
-        evaluation = None
 
     # Merge the generated lists into the persistent curated set (accumulate, not
-    # replace) and snapshot the run (summary + eval) for the history timeline.
+    # replace) and snapshot the run (summary + eval + trace span_id).
     new_c = await asyncio.to_thread(
         store.merge_items, tenant, req.company_url, "competitor",
         [c.model_dump() for c in analysis.competitors],
@@ -152,7 +166,7 @@ async def analyze(req: AnalyzeRequest):
         [p.model_dump() for p in analysis.icp_prospects],
     )
     await asyncio.to_thread(
-        store.save_snapshot, req.company_url, analysis.model_dump(), evaluation
+        store.save_snapshot, req.company_url, analysis.model_dump(), evaluation, span_id
     )
 
     view = await asyncio.to_thread(store.workspace_items, tenant, req.company_url)
@@ -259,6 +273,7 @@ async def feedback(req: FeedbackRequest):
     await asyncio.to_thread(
         store.set_item_status, tenant, req.company_url, req.item_type, req.item_key, status
     )
+    # Keep the user_feedback span — Tier 2 reads it back as the learning signal.
     log_feedback(
         tenant,
         store.company_key(req.company_url),
@@ -267,16 +282,26 @@ async def feedback(req: FeedbackRequest):
         req.item_label,
         req.decision,
     )
-    # Tier 1: track the per-workspace usefulness signal (keep-rate) in Phoenix
-    # alongside groundedness, so the agent is measured on both axes over time.
+    # Annotate the latest analysis trace so the human keep/dismiss AND the updated
+    # usefulness (keep-rate) show in Phoenix's Annotations tab on that trace.
+    span_id = await asyncio.to_thread(store.latest_span_id, tenant, req.company_url)
+    if span_id and req.decision in ("keep", "dismiss"):
+        observability.annotate_span(
+            span_id,
+            f"feedback: {req.item_label}"[:60],
+            label=req.decision,
+            score=1.0 if req.decision == "keep" else 0.0,
+            explanation=f"{req.item_type}: {req.item_label}",
+            kind="HUMAN",
+        )
     kr = await asyncio.to_thread(store.keep_rate, tenant, req.company_url)
-    if kr["keep_rate"] is not None:
-        log_eval(
+    if span_id and kr["keep_rate"] is not None:
+        observability.annotate_span(
+            span_id,
             "usefulness",
-            tenant,
-            store.company_key(req.company_url),
-            kr["keep_rate"],
-            "useful" if kr["keep_rate"] >= 0.5 else "low",
-            f"{kr['kept']} kept / {kr['dismissed']} dismissed",
+            score=kr["keep_rate"],
+            label="useful" if kr["keep_rate"] >= 0.5 else "low",
+            explanation=f"{kr['kept']} kept / {kr['dismissed']} dismissed",
+            kind="CODE",
         )
     return {"ok": True}
