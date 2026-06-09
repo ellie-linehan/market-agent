@@ -6,3 +6,8 @@
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
+
+# Basic Auth gate (demo/hackathon). Override via Netlify env BASIC_AUTH_USER/PASS.
+[[edge_functions]]
+  path = "/*"
+  function = "auth"
