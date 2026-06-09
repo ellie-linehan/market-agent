@@ -1,0 +1,22 @@
+digraph loop {
+  rankdir=TB; fontname="Helvetica"; bgcolor="#f4f1ea"; pad=0.4; nodesep=0.5; ranksep=0.7;
+  node [fontname="Helvetica", fontsize=12, shape=box, style="filled,rounded", color="#d9d2c3", fillcolor="white", fontcolor="#2b2b2b", margin="0.22,0.13"];
+  edge [fontname="Helvetica", fontsize=10, color="#9b8f7a", fontcolor="#6b6256"];
+
+  run    [label="1 ·  RUN\nADK pipeline analyzes the company"];
+  eval   [label="2 ·  EVALUATE\ngroundedness (LLM judge)  +  usefulness (keep-rate)", fillcolor="#fdf3d6", color="#c9a227"];
+  curate [label="3 ·  CURATE\nfounder Keep / Dismiss"];
+  learn  [label="4 ·  LEARN\nnext scan reads its graded\nkeep/dismiss back from Phoenix", fillcolor="#fdf3d6", color="#c9a227"];
+
+  phoenix [label="Arize Phoenix\nevaluation & improvement engine\ntraces · evals · annotations · MCP", fillcolor="#fbf6e6", color="#c9a227", fontcolor="#a07b1e", penwidth=1.6];
+
+  run -> eval -> curate -> learn [color="#c9a227", penwidth=1.8];
+  learn -> run [label="re-scan\n(periodic)", color="#c9a227", penwidth=1.8, constraint=false];
+
+  run    -> phoenix [label="traced", style=dashed];
+  eval   -> phoenix [label="scores", style=dashed];
+  curate -> phoenix [label="annotations", style=dashed];
+  phoenix -> learn  [label="graded history", style=dashed, color="#c9a227", fontcolor="#a07b1e"];
+
+  { rank=same; curate; phoenix; }
+}
