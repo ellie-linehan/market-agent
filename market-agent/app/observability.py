@@ -31,12 +31,15 @@ def setup_phoenix() -> None:
     )
 
 
-def log_eval(name: str, company: str, score: float, label: str, reason: str) -> None:
-    """Emit an LLM-as-judge eval result as a span so it lands in Phoenix
-    alongside the agent traces."""
+def log_eval(
+    name: str, tenant_id: str, company: str, score: float, label: str, reason: str
+) -> None:
+    """Emit an eval result (machine groundedness or human usefulness) as a
+    tenant-tagged span so it lands in Phoenix alongside the agent traces."""
     tracer = trace.get_tracer("market-agent.eval")
     with tracer.start_as_current_span(f"eval.{name}") as span:
         span.set_attribute("eval.name", name)
+        span.set_attribute("tenant.id", tenant_id)
         span.set_attribute("eval.company", company)
         span.set_attribute("eval.score", score)
         span.set_attribute("eval.label", label)
@@ -44,12 +47,18 @@ def log_eval(name: str, company: str, score: float, label: str, reason: str) -> 
 
 
 def log_feedback(
-    company: str, item_type: str, item_key: str, item_label: str, decision: str
+    tenant_id: str,
+    company: str,
+    item_type: str,
+    item_key: str,
+    item_label: str,
+    decision: str,
 ) -> None:
-    """Emit a user-feedback span so keep/dismiss signal flows into Phoenix as
-    the human-feedback layer of the self-improvement loop."""
+    """Emit a tenant-tagged user-feedback span so keep/dismiss flows into Phoenix
+    as the human-feedback layer of the self-improvement loop."""
     tracer = trace.get_tracer("market-agent.feedback")
     with tracer.start_as_current_span("user_feedback") as span:
+        span.set_attribute("tenant.id", tenant_id)
         span.set_attribute("feedback.company", company)
         span.set_attribute("feedback.item_type", item_type)
         span.set_attribute("feedback.item_key", item_key)

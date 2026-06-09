@@ -7,6 +7,10 @@ import { useState, FormEvent } from 'react'
 // Set NEXT_PUBLIC_BACKEND_URL in Netlify; defaults to localhost for dev.
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
 
+const CANDIDATE_CAP = 7 // Miller's Law: don't dump unbounded lists on the user.
+
+type Status = 'kept' | 'candidate' | 'dismissed'
+
 interface Competitor {
   name: string
   url: string
@@ -14,6 +18,8 @@ interface Competitor {
   target_segment: string
   key_features: string[]
   pricing_model?: string
+  item_key: string
+  status: Status
 }
 
 interface Prospect {
@@ -23,13 +29,8 @@ interface Prospect {
   employee_count?: string
   industry?: string
   tech_stack: string[]
-}
-
-interface MarketAnalysis {
-  company: string
-  competitors: Competitor[]
-  icp_prospects: Prospect[]
-  market_summary: string
+  item_key: string
+  status: Status
 }
 
 interface Evaluation {
@@ -38,50 +39,20 @@ interface Evaluation {
   reason: string
 }
 
+interface Workspace {
+  company: string
+  market_summary: string
+  eval?: Evaluation | null
+  competitors: Competitor[]
+  icp_prospects: Prospect[]
+  new_competitors: string[]
+  new_prospects: string[]
+}
+
 interface Snapshot {
   id: string
   created_at: string
   company_name: string
-  analysis: MarketAnalysis
-  eval?: Evaluation | null
-}
-
-function GroundingBadge({ evaluation }: { evaluation: Evaluation }) {
-  const tone =
-    evaluation.label === 'grounded'
-      ? 'bg-green-50 border-green-200 text-green-700'
-      : evaluation.label === 'partial'
-      ? 'bg-amber-50 border-amber-200 text-amber-700'
-      : 'bg-red-50 border-red-200 text-red-700'
-  return (
-    <span
-      title={evaluation.reason}
-      className={`text-xs px-2 py-0.5 rounded-full border ${tone}`}
-    >
-      Grounding {evaluation.score.toFixed(2)} · {evaluation.label}
-    </span>
-  )
-}
-
-interface PricingChange {
-  name: string
-  from?: string
-  to?: string
-}
-
-interface ChangeDiff {
-  competitors_added: Competitor[]
-  competitors_removed: Competitor[]
-  pricing_changed: PricingChange[]
-  prospects_added: Prospect[]
-  prospects_removed: Prospect[]
-}
-
-interface ChangesResponse {
-  has_prior: boolean
-  from_date?: string
-  to_date?: string
-  diff?: ChangeDiff
 }
 
 function formatSnapshotTime(iso: string): string {
@@ -94,8 +65,30 @@ function formatSnapshotTime(iso: string): string {
   })
 }
 
+// Quiet when grounded; only speaks up when the eval caught a problem.
+function GroundingBadge({ evaluation }: { evaluation: Evaluation }) {
+  if (evaluation.label === 'grounded') {
+    return (
+      <span title={evaluation.reason} className="text-xs text-green-700/70">
+        ✓ Grounded
+      </span>
+    )
+  }
+  const tone =
+    evaluation.label === 'partial'
+      ? 'bg-amber-50 border-amber-300 text-amber-800'
+      : 'bg-red-50 border-red-300 text-red-700'
+  return (
+    <span
+      title={evaluation.reason}
+      className={`text-xs px-2 py-0.5 rounded-full border font-medium ${tone}`}
+    >
+      ⚠ Low grounding ({evaluation.score.toFixed(2)}) — review
+    </span>
+  )
+}
+
 // Only split where punctuation is followed by whitespace + a capital letter.
-// This naturally handles .com, URLs, e.g., i.e., etc. without special casing.
 function splitSentences(text: string): string[] {
   return text
     .split(/(?<=[.!?])\s+(?=[A-Z])/)
@@ -113,7 +106,6 @@ function shortPricingLabel(model: string): string {
   if (m.includes('subscription') || m.includes('/month') || m.includes('/seat') || m.includes('/user')) return 'Subscription'
   if (m.includes('enterprise')) return 'Enterprise'
   if (m.includes('custom')) return 'Custom'
-  // Fall back to first two words max
   return model.split(/[\s,]/)[0]
 }
 
@@ -129,7 +121,6 @@ function SummaryBlock({ text }: { text: string }) {
   const body = insightMatch ? insightMatch[1].trim() : text
   const rawInsight = insightMatch ? insightMatch[2].trim() : null
   const insight = rawInsight ? stripInsightPreamble(rawInsight) : null
-
   const bodySentences = splitSentences(body)
   const insightSentences = insight ? splitSentences(insight) : []
 
@@ -157,14 +148,12 @@ function SummaryBlock({ text }: { text: string }) {
   )
 }
 
-type Decision = 'keep' | 'dismiss'
-
 function FeedbackButtons({
-  decision,
+  status,
   onKeep,
   onDismiss,
 }: {
-  decision?: Decision
+  status: Status
   onKeep: () => void
   onDismiss: () => void
 }) {
@@ -173,20 +162,16 @@ function FeedbackButtons({
       <button
         onClick={onKeep}
         className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
-          decision === 'keep'
+          status === 'kept'
             ? 'bg-charcoal text-cream border-charcoal'
             : 'bg-white text-charcoal/60 border-cream-dark hover:border-tan'
         }`}
       >
-        ✓ Keep
+        {status === 'kept' ? '✓ Kept' : '✓ Keep'}
       </button>
       <button
         onClick={onDismiss}
-        className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
-          decision === 'dismiss'
-            ? 'bg-charcoal text-cream border-charcoal'
-            : 'bg-white text-charcoal/60 border-cream-dark hover:border-tan'
-        }`}
+        className="text-xs px-2.5 py-1 rounded-md border bg-white text-charcoal/50 border-cream-dark hover:border-red-300 hover:text-red-600 transition-colors"
       >
         ✕ Dismiss
       </button>
@@ -196,23 +181,17 @@ function FeedbackButtons({
 
 function CompetitorCard({
   c,
-  decision,
   onKeep,
   onDismiss,
 }: {
   c: Competitor
-  decision?: Decision
   onKeep: () => void
   onDismiss: () => void
 }) {
   return (
     <div
       className={`bg-white border rounded-lg p-5 flex flex-col gap-3 transition-all ${
-        decision === 'dismiss'
-          ? 'border-cream-dark opacity-50'
-          : decision === 'keep'
-          ? 'border-tan ring-1 ring-tan'
-          : 'border-cream-dark hover:border-tan'
+        c.status === 'kept' ? 'border-tan ring-1 ring-tan' : 'border-cream-dark hover:border-tan'
       }`}
     >
       <div className="flex items-start justify-between gap-2">
@@ -246,7 +225,7 @@ function CompetitorCard({
         </ul>
       )}
       <div className="pt-1 mt-auto">
-        <FeedbackButtons decision={decision} onKeep={onKeep} onDismiss={onDismiss} />
+        <FeedbackButtons status={c.status} onKeep={onKeep} onDismiss={onDismiss} />
       </div>
     </div>
   )
@@ -254,19 +233,17 @@ function CompetitorCard({
 
 function ProspectRow({
   p,
-  decision,
   onKeep,
   onDismiss,
 }: {
   p: Prospect
-  decision?: Decision
   onKeep: () => void
   onDismiss: () => void
 }) {
   return (
     <div
-      className={`flex flex-col sm:flex-row sm:items-start gap-3 py-4 border-b border-cream-dark last:border-0 transition-opacity ${
-        decision === 'dismiss' ? 'opacity-50' : ''
+      className={`flex flex-col sm:flex-row sm:items-start gap-3 py-4 border-b border-cream-dark last:border-0 ${
+        p.status === 'kept' ? 'bg-cream/40 -mx-5 px-5' : ''
       }`}
     >
       <div className="sm:w-48 shrink-0">
@@ -294,91 +271,46 @@ function ProspectRow({
             </span>
           )}
           {p.tech_stack.slice(0, 3).map((t, i) => (
-            <span
-              key={i}
-              className="text-xs bg-cream border border-cream-dark text-charcoal/70 px-2 py-0.5 rounded-full"
-            >
+            <span key={i} className="text-xs bg-cream border border-cream-dark text-charcoal/70 px-2 py-0.5 rounded-full">
               {t}
             </span>
           ))}
         </div>
       </div>
       <div className="shrink-0 sm:pt-0.5">
-        <FeedbackButtons decision={decision} onKeep={onKeep} onDismiss={onDismiss} />
+        <FeedbackButtons status={p.status} onKeep={onKeep} onDismiss={onDismiss} />
       </div>
     </div>
   )
 }
 
-function ChangeLine({
-  tone,
-  label,
-  value,
-}: {
-  tone: 'add' | 'remove' | 'change'
-  label: string
-  value: string
-}) {
-  const sym = tone === 'add' ? '+' : tone === 'remove' ? '−' : '±'
-  const color =
-    tone === 'add' ? 'text-green-700' : tone === 'remove' ? 'text-red-600' : 'text-tan'
+function NewThisRun({ competitors, prospects }: { competitors: string[]; prospects: string[] }) {
+  if (competitors.length === 0 && prospects.length === 0) return null
   return (
-    <div className="flex gap-2.5 items-baseline">
-      <span className={`${color} font-semibold shrink-0 w-3`}>{sym}</span>
-      <span className="text-charcoal/50 text-xs uppercase tracking-wide shrink-0 w-40">
-        {label}
-      </span>
-      <span className="text-charcoal/90">{value}</span>
-    </div>
-  )
-}
-
-function ChangesPanel({ changes }: { changes: ChangesResponse }) {
-  if (!changes.has_prior || !changes.diff) return null
-  const d = changes.diff
-  const total =
-    d.competitors_added.length +
-    d.competitors_removed.length +
-    d.pricing_changed.length +
-    d.prospects_added.length +
-    d.prospects_removed.length
-
-  return (
-    <section>
+    <div className="bg-white border border-cream-dark rounded-lg px-5 py-4">
       <h2 className="text-xs font-semibold uppercase tracking-widest text-tan mb-3">
-        What changed
-        {changes.from_date && (
-          <span className="ml-2 text-charcoal/40 normal-case tracking-normal font-normal">
-            since your run on {formatSnapshotTime(changes.from_date)}
-          </span>
-        )}
+        New this run
+        <span className="ml-2 text-charcoal/40 normal-case tracking-normal font-normal">
+          entrants not seen in earlier scans
+        </span>
       </h2>
-      <div className="bg-white border border-cream-dark rounded-lg px-5 py-4 flex flex-col gap-2.5">
-        {total === 0 && (
-          <p className="text-sm text-charcoal/60">No changes since the last analysis.</p>
-        )}
-        {d.competitors_added.map((c, i) => (
-          <ChangeLine key={`ca${i}`} tone="add" label="New competitor" value={c.name} />
+      <div className="flex flex-col gap-2">
+        {competitors.map((name, i) => (
+          <div key={`c${i}`} className="flex gap-2.5 items-baseline text-sm">
+            <span className="text-green-700 font-semibold w-3 shrink-0">+</span>
+            <span className="text-charcoal/50 text-xs uppercase tracking-wide w-28 shrink-0">Competitor</span>
+            <span className="text-charcoal/90">{name}</span>
+          </div>
         ))}
-        {d.competitors_removed.map((c, i) => (
-          <ChangeLine key={`cr${i}`} tone="remove" label="Competitor dropped" value={c.name} />
-        ))}
-        {d.pricing_changed.map((p, i) => (
-          <ChangeLine
-            key={`pc${i}`}
-            tone="change"
-            label={`Pricing · ${p.name}`}
-            value={`${p.from ?? '—'} → ${p.to ?? '—'}`}
-          />
-        ))}
-        {d.prospects_added.map((p, i) => (
-          <ChangeLine key={`pa${i}`} tone="add" label="New prospect" value={p.company_name} />
-        ))}
-        {d.prospects_removed.map((p, i) => (
-          <ChangeLine key={`pr${i}`} tone="remove" label="Prospect dropped" value={p.company_name} />
+        {prospects.map((name, i) => (
+          <div key={`p${i}`} className="flex gap-2.5 items-baseline text-sm">
+            <span className="text-green-700 font-semibold w-3 shrink-0">+</span>
+            <span className="text-charcoal/50 text-xs uppercase tracking-wide w-28 shrink-0">Prospect</span>
+            <span className="text-charcoal/90">{name}</span>
+          </div>
         ))}
       </div>
-    </section>
+    </div>
   )
 }
 
@@ -394,78 +326,66 @@ function Spinner() {
   )
 }
 
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <h2 className="text-xs font-semibold uppercase tracking-widest text-tan mb-4">{children}</h2>
+}
+
 export default function Home() {
   const [url, setUrl] = useState('')
   const [activeUrl, setActiveUrl] = useState('')
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<MarketAnalysis | null>(null)
+  const [result, setResult] = useState<Workspace | null>(null)
   const [history, setHistory] = useState<Snapshot[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [feedback, setFeedback] = useState<Record<string, Decision>>({})
-  const [changes, setChanges] = useState<ChangesResponse | null>(null)
+  const [showAllComps, setShowAllComps] = useState(false)
+  const [showAllProspects, setShowAllProspects] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const competitorKey = (c: Competitor) => `competitor:${c.url || c.name}`
-  const prospectKey = (p: Prospect) => `prospect:${p.website || p.company_name}`
-  const keptCount = Object.values(feedback).filter(d => d === 'keep').length
-  const dismissedCount = Object.values(feedback).filter(d => d === 'dismiss').length
-  const currentEval = history.find(s => s.id === selectedId)?.eval ?? null
-
-  async function loadHistory(companyUrl: string): Promise<Snapshot[]> {
+  async function loadHistory(companyUrl: string) {
     const res = await fetch(`${BACKEND}/company?url=${encodeURIComponent(companyUrl)}`)
-    if (!res.ok) return []
-    const data = await res.json()
-    return (data.history ?? []) as Snapshot[]
-  }
-
-  async function loadFeedback(companyUrl: string) {
-    const res = await fetch(`${BACKEND}/feedback?url=${encodeURIComponent(companyUrl)}`)
     if (!res.ok) return
     const data = await res.json()
-    const map: Record<string, Decision> = {}
-    for (const r of data.feedback ?? []) {
-      map[`${r.item_type}:${r.item_key}`] = r.decision
-    }
-    setFeedback(map)
+    setHistory((data.history ?? []) as Snapshot[])
   }
 
-  async function loadChanges(companyUrl: string) {
-    const res = await fetch(`${BACKEND}/changes?url=${encodeURIComponent(companyUrl)}`)
+  async function reloadItems(companyUrl: string) {
+    const res = await fetch(`${BACKEND}/workspace?url=${encodeURIComponent(companyUrl)}`)
     if (!res.ok) return
-    setChanges((await res.json()) as ChangesResponse)
+    const data = await res.json()
+    setResult(prev =>
+      prev ? { ...prev, competitors: data.competitors, icp_prospects: data.icp_prospects } : prev
+    )
   }
 
-  async function sendFeedback(
-    itemType: 'competitor' | 'prospect',
-    itemKey: string,
-    itemLabel: string,
-    decision: Decision,
-  ) {
-    const mapKey = `${itemType}:${itemKey}`
-    // Toggle off if the same decision is clicked again.
-    const next: Decision | undefined = feedback[mapKey] === decision ? undefined : decision
-    setFeedback(prev => {
-      const copy = { ...prev }
-      if (next) copy[mapKey] = next
-      else delete copy[mapKey]
-      return copy
-    })
+  async function sendCompetitorFeedback(c: Competitor, decision: 'keep' | 'dismiss') {
+    const d = decision === 'keep' && c.status === 'kept' ? 'none' : decision
     await fetch(`${BACKEND}/feedback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         company_url: activeUrl,
-        item_type: itemType,
-        item_key: itemKey,
-        item_label: itemLabel,
-        decision: next ?? 'none',
+        item_type: 'competitor',
+        item_key: c.item_key,
+        item_label: c.name,
+        decision: d,
       }),
     })
+    await reloadItems(activeUrl)
   }
 
-  function selectSnapshot(snap: Snapshot) {
-    setSelectedId(snap.id)
-    setResult(snap.analysis)
+  async function sendProspectFeedback(p: Prospect, decision: 'keep' | 'dismiss') {
+    const d = decision === 'keep' && p.status === 'kept' ? 'none' : decision
+    await fetch(`${BACKEND}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        company_url: activeUrl,
+        item_type: 'prospect',
+        item_key: p.item_key,
+        item_label: p.company_name,
+        decision: d,
+      }),
+    })
+    await reloadItems(activeUrl)
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -474,8 +394,8 @@ export default function Home() {
     setLoading(true)
     setResult(null)
     setHistory([])
-    setSelectedId(null)
-    setChanges(null)
+    setShowAllComps(false)
+    setShowAllProspects(false)
     setError(null)
 
     try {
@@ -485,21 +405,12 @@ export default function Home() {
         body: JSON.stringify({ company_url: url.trim() }),
       })
       if (!res.ok) {
-        const data = await res.json()
-        throw new Error(data.error ?? 'Analysis failed')
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail ?? data.error ?? 'Analysis failed')
       }
       setActiveUrl(url.trim())
-      setResult(await res.json())
-
-      // The snapshot was just saved server-side — load the company's full
-      // timeline, prior feedback, and what changed since the last run.
-      const [snaps] = await Promise.all([
-        loadHistory(url.trim()),
-        loadFeedback(url.trim()),
-        loadChanges(url.trim()),
-      ])
-      setHistory(snaps)
-      if (snaps.length > 0) setSelectedId(snaps[0].id)
+      setResult((await res.json()) as Workspace)
+      await loadHistory(url.trim())
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
@@ -507,21 +418,24 @@ export default function Home() {
     }
   }
 
+  const keptComps = result ? result.competitors.filter(c => c.status === 'kept') : []
+  const candComps = result ? result.competitors.filter(c => c.status !== 'kept') : []
+  const keptProspects = result ? result.icp_prospects.filter(p => p.status === 'kept') : []
+  const candProspects = result ? result.icp_prospects.filter(p => p.status !== 'kept') : []
+  const visibleComps = showAllComps ? candComps : candComps.slice(0, CANDIDATE_CAP)
+  const visibleProspects = showAllProspects ? candProspects : candProspects.slice(0, CANDIDATE_CAP)
+
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Header */}
       <header className="bg-charcoal px-6 py-5">
         <div className="max-w-5xl mx-auto flex items-baseline gap-3">
           <h1 className="text-cream text-xl font-semibold tracking-tight">Market Intelligence</h1>
-          <span className="text-tan text-sm">B2B competitive landscape & ICP analysis</span>
+          <span className="text-tan text-sm">B2B competitive landscape &amp; ICP analysis</span>
         </div>
       </header>
 
-      {/* Main */}
       <main className="flex-1 px-6 py-12">
         <div className="max-w-5xl mx-auto flex flex-col gap-10">
-
-          {/* Input */}
           <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3 max-w-2xl">
             <input
               type="text"
@@ -549,105 +463,125 @@ export default function Home() {
 
           {result && (
             <div className="flex flex-col gap-10">
+              <NewThisRun competitors={result.new_competitors} prospects={result.new_prospects} />
 
-              {/* What changed since last run */}
-              {changes && <ChangesPanel changes={changes} />}
-
-              {/* Workspace history timeline */}
               {history.length > 0 && (
                 <section>
                   <h2 className="text-xs font-semibold uppercase tracking-widest text-tan mb-3">
                     Workspace history
                     <span className="ml-2 text-charcoal/40 normal-case tracking-normal font-normal">
-                      {history.length} {history.length === 1 ? 'snapshot' : 'snapshots'} saved
+                      {history.length} {history.length === 1 ? 'run' : 'runs'} · curated set accumulates across them
                     </span>
                   </h2>
                   <div className="flex flex-wrap gap-2">
                     {history.map((snap, i) => (
-                      <button
+                      <span
                         key={snap.id}
-                        onClick={() => selectSnapshot(snap)}
-                        className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                          snap.id === selectedId
+                        className={`text-xs px-3 py-1.5 rounded-full border ${
+                          i === 0
                             ? 'bg-charcoal text-cream border-charcoal'
-                            : 'bg-white text-charcoal/70 border-cream-dark hover:border-tan'
+                            : 'bg-white text-charcoal/60 border-cream-dark'
                         }`}
                       >
                         {formatSnapshotTime(snap.created_at)}
-                        {i === 0 && (
-                          <span className="ml-1.5 opacity-60">· latest</span>
-                        )}
-                      </button>
+                        {i === 0 && <span className="ml-1.5 opacity-60">· latest</span>}
+                      </span>
                     ))}
                   </div>
                 </section>
               )}
 
-              {/* Feedback signal banner */}
-              {(keptCount > 0 || dismissedCount > 0) && (
-                <div className="bg-cream border border-cream-dark rounded-lg px-4 py-3 flex items-center gap-3 text-sm">
-                  <span className="text-tan font-semibold text-xs uppercase tracking-wide shrink-0">
-                    Learning
-                  </span>
-                  <span className="text-charcoal/80">
-                    This workspace has <strong>{keptCount} kept</strong> and{' '}
-                    <strong>{dismissedCount} dismissed</strong>. Re-run Analyze to refine
-                    competitors and prospects toward your judgment.
-                  </span>
-                </div>
-              )}
-
-              {/* Summary */}
               <section>
                 <div className="flex items-center gap-3 mb-3 flex-wrap">
                   <h2 className="text-xs font-semibold uppercase tracking-widest text-tan">
                     Market Summary — {result.company}
                   </h2>
-                  {currentEval && <GroundingBadge evaluation={currentEval} />}
+                  {result.eval && <GroundingBadge evaluation={result.eval} />}
                 </div>
                 <SummaryBlock text={result.market_summary} />
               </section>
 
-              {/* Competitive Landscape */}
-              {result.competitors.length > 0 && (
+              {(keptComps.length > 0 || candComps.length > 0) && (
                 <section>
-                  <h2 className="text-xs font-semibold uppercase tracking-widest text-tan mb-4">
-                    Competitive Landscape
-                  </h2>
+                  <SectionLabel>Competitive Landscape</SectionLabel>
+
+                  {keptComps.length > 0 && (
+                    <div className="mb-5">
+                      <p className="text-xs text-charcoal/50 mb-2 font-medium">★ Your shortlist</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {keptComps.map(c => (
+                          <CompetitorCard
+                            key={c.item_key}
+                            c={c}
+                            onKeep={() => sendCompetitorFeedback(c, 'keep')}
+                            onDismiss={() => sendCompetitorFeedback(c, 'dismiss')}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {result.competitors.map((c, i) => (
+                    {visibleComps.map(c => (
                       <CompetitorCard
-                        key={i}
+                        key={c.item_key}
                         c={c}
-                        decision={feedback[competitorKey(c)]}
-                        onKeep={() => sendFeedback('competitor', c.url || c.name, c.name, 'keep')}
-                        onDismiss={() => sendFeedback('competitor', c.url || c.name, c.name, 'dismiss')}
+                        onKeep={() => sendCompetitorFeedback(c, 'keep')}
+                        onDismiss={() => sendCompetitorFeedback(c, 'dismiss')}
                       />
                     ))}
                   </div>
+                  {candComps.length > CANDIDATE_CAP && (
+                    <button
+                      onClick={() => setShowAllComps(v => !v)}
+                      className="mt-3 text-xs text-tan hover:underline"
+                    >
+                      {showAllComps ? 'Show fewer' : `Show ${candComps.length - CANDIDATE_CAP} more`}
+                    </button>
+                  )}
                 </section>
               )}
 
-              {/* ICP Prospects */}
-              {result.icp_prospects.length > 0 && (
+              {(keptProspects.length > 0 || candProspects.length > 0) && (
                 <section>
-                  <h2 className="text-xs font-semibold uppercase tracking-widest text-tan mb-4">
-                    ICP Prospects
-                  </h2>
+                  <SectionLabel>ICP Prospects</SectionLabel>
+
+                  {keptProspects.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-xs text-charcoal/50 mb-2 font-medium">★ Your shortlist</p>
+                      <div className="bg-white border border-tan ring-1 ring-tan rounded-lg px-5 divide-y divide-cream-dark">
+                        {keptProspects.map(p => (
+                          <ProspectRow
+                            key={p.item_key}
+                            p={p}
+                            onKeep={() => sendProspectFeedback(p, 'keep')}
+                            onDismiss={() => sendProspectFeedback(p, 'dismiss')}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="bg-white border border-cream-dark rounded-lg px-5 divide-y divide-cream-dark">
-                    {result.icp_prospects.map((p, i) => (
+                    {visibleProspects.map(p => (
                       <ProspectRow
-                        key={i}
+                        key={p.item_key}
                         p={p}
-                        decision={feedback[prospectKey(p)]}
-                        onKeep={() => sendFeedback('prospect', p.website || p.company_name, p.company_name, 'keep')}
-                        onDismiss={() => sendFeedback('prospect', p.website || p.company_name, p.company_name, 'dismiss')}
+                        onKeep={() => sendProspectFeedback(p, 'keep')}
+                        onDismiss={() => sendProspectFeedback(p, 'dismiss')}
                       />
                     ))}
                   </div>
+                  {candProspects.length > CANDIDATE_CAP && (
+                    <button
+                      onClick={() => setShowAllProspects(v => !v)}
+                      className="mt-3 text-xs text-tan hover:underline"
+                    >
+                      {showAllProspects ? 'Show fewer' : `Show ${candProspects.length - CANDIDATE_CAP} more`}
+                    </button>
+                  )}
                 </section>
               )}
-
             </div>
           )}
         </div>

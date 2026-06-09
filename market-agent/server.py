@@ -71,12 +71,14 @@ async def health():
     return {"status": "ok"}
 
 
-@app.post("/analyze", response_model=MarketAnalysis)
-async def analyze(req: AnalyzeRequest) -> MarketAnalysis:
+@app.post("/analyze")
+async def analyze(req: AnalyzeRequest):
+    tenant = store.DEFAULT_TENANT
     session_id = uuid.uuid4().hex
-    # Fold in this workspace's accumulated keep/dismiss feedback so the agents
-    # weight toward what the founder keeps and away from what they dismiss.
-    preferences = await asyncio.to_thread(store.format_preferences, req.company_url)
+    # Fold in this workspace's accumulated keep/dismiss so the agents weight
+    # toward what the founder keeps and away from what they dismiss.
+    # (Phase 4 reads this from Phoenix; Mongo is the current source/fallback.)
+    preferences = await asyncio.to_thread(store.item_preferences, tenant, req.company_url)
     await _runner.session_service.create_session(
         app_name=_APP_NAME,
         user_id="web",
@@ -121,6 +123,7 @@ async def analyze(req: AnalyzeRequest) -> MarketAnalysis:
             evaluation = result.model_dump()
             log_eval(
                 "groundedness",
+                tenant,
                 analysis.company,
                 result.score,
                 result.label,
@@ -129,10 +132,43 @@ async def analyze(req: AnalyzeRequest) -> MarketAnalysis:
     except Exception:  # noqa: BLE001 - eval is best-effort, never break analysis
         evaluation = None
 
+    # Merge the generated lists into the persistent curated set (accumulate, not
+    # replace) and snapshot the run (summary + eval) for the history timeline.
+    new_c = await asyncio.to_thread(
+        store.merge_items, tenant, req.company_url, "competitor",
+        [c.model_dump() for c in analysis.competitors],
+    )
+    new_p = await asyncio.to_thread(
+        store.merge_items, tenant, req.company_url, "prospect",
+        [p.model_dump() for p in analysis.icp_prospects],
+    )
     await asyncio.to_thread(
         store.save_snapshot, req.company_url, analysis.model_dump(), evaluation
     )
-    return analysis
+
+    view = await asyncio.to_thread(store.workspace_items, tenant, req.company_url)
+    return {
+        "company": analysis.company,
+        "market_summary": analysis.market_summary,
+        "eval": evaluation,
+        "competitors": view["competitors"],
+        "icp_prospects": view["prospects"],
+        "new_competitors": [c.get("name") for c in new_c],
+        "new_prospects": [p.get("company_name") for p in new_p],
+    }
+
+
+@app.get("/workspace")
+async def workspace(url: str):
+    """Load the merged curated set (kept + candidates, dismissed excluded)."""
+    tenant = store.DEFAULT_TENANT
+    view = await asyncio.to_thread(store.workspace_items, tenant, url)
+    return {
+        "company_url": url,
+        "competitors": view["competitors"],
+        "icp_prospects": view["prospects"],
+        "keep_rate": await asyncio.to_thread(store.keep_rate, tenant, url),
+    }
 
 
 @app.get("/company")
@@ -207,26 +243,31 @@ async def insights_endpoint(req: InsightsRequest):
 
 @app.post("/feedback")
 async def feedback(req: FeedbackRequest):
-    """Record a keep/dismiss and log it to Arize as human-feedback signal."""
+    """Set an item's curated status (keep=pin, dismiss=hide, else candidate) and
+    log the signal to Phoenix as tenant-tagged human feedback."""
+    tenant = store.DEFAULT_TENANT
+    status = {"keep": "kept", "dismiss": "dismissed"}.get(req.decision, "candidate")
     await asyncio.to_thread(
-        store.save_feedback,
-        req.company_url,
-        req.item_type,
-        req.item_key,
-        req.item_label,
-        req.decision,
+        store.set_item_status, tenant, req.company_url, req.item_type, req.item_key, status
     )
     log_feedback(
+        tenant,
         store.company_key(req.company_url),
         req.item_type,
         req.item_key,
         req.item_label,
         req.decision,
     )
+    # Tier 1: track the per-workspace usefulness signal (keep-rate) in Phoenix
+    # alongside groundedness, so the agent is measured on both axes over time.
+    kr = await asyncio.to_thread(store.keep_rate, tenant, req.company_url)
+    if kr["keep_rate"] is not None:
+        log_eval(
+            "usefulness",
+            tenant,
+            store.company_key(req.company_url),
+            kr["keep_rate"],
+            "useful" if kr["keep_rate"] >= 0.5 else "low",
+            f"{kr['kept']} kept / {kr['dismissed']} dismissed",
+        )
     return {"ok": True}
-
-
-@app.get("/feedback")
-async def get_feedback(url: str):
-    """All keep/dismiss decisions for a company workspace."""
-    return {"feedback": await asyncio.to_thread(store.get_feedback, url)}

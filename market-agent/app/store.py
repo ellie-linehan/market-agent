@@ -9,6 +9,9 @@ from pymongo import MongoClient, DESCENDING
 _client: MongoClient | None = None
 
 
+DEFAULT_TENANT = "demo"
+
+
 def _db():
     global _client
     if _client is None:
@@ -134,13 +137,30 @@ def format_preferences(company_url: str) -> str:
     return "\n".join(lines)
 
 
+_NAME_STOP = {
+    "and", "the", "of", "for", "a", "an",
+    "inc", "incorporated", "llc", "llp", "ltd", "corp", "corporation", "co",
+    "company", "group", "holdings", "services", "systems", "system",
+    "solutions", "technologies", "technology", "partners", "software", "labs",
+    "lab",
+}
+_NAME_PREFIXES = ("city of ", "town of ", "county of ")
+
+
 def _norm_name(s: str | None) -> str:
-    """Normalize a company name for identity matching: drop parentheticals and
-    punctuation so 'LRS (PensionGold)' and 'LRS (Levi, Ray & Shoup)' collide."""
+    """Normalize a company/entity name for identity matching, so naming variants
+    collide: 'LRS (PensionGold)' ~ 'LRS (Levi, Ray & Shoup)', 'Tegrit' ~ 'Tegrit
+    Group', 'City of Quincy Retirement System' ~ 'Quincy Retirement System',
+    'X & Y' ~ 'X and Y'."""
     s = (s or "").lower()
     s = re.sub(r"\([^)]*\)", " ", s)  # drop parentheticals
-    s = re.sub(r"[^a-z0-9]+", " ", s)  # punctuation -> space
-    return " ".join(s.split())
+    s = re.sub(r"[^a-z0-9]+", " ", s)  # punctuation/& -> space
+    s = " ".join(s.split())
+    for p in _NAME_PREFIXES:
+        if s.startswith(p):
+            s = s[len(p):]
+    toks = [t for t in s.split() if t not in _NAME_STOP]
+    return " ".join(toks) or s
 
 
 def _pricing_bucket(model: str | None) -> str:
@@ -211,6 +231,137 @@ def get_changes(company_url: str) -> dict:
         "to_date": curr["created_at"],
         "diff": diff_analyses(prev["analysis"], curr["analysis"]),
     }
+
+
+# --- Accumulate-and-curate item model (B) -------------------------------------
+# A workspace keeps a persistent, deduped set of competitors/prospects across
+# runs. Each item has a status: candidate (default, seen but not acted on),
+# kept (pinned by the user), or dismissed (excluded). Analyze MERGES new
+# findings in; it never replaces the set, so "no action" never means "dropped".
+
+_ITEM_KEYFN = {"competitor": _competitor_key, "prospect": _prospect_key}
+
+
+def merge_items(
+    tenant_id: str, company_url: str, item_type: str, generated: list[dict]
+) -> list[dict]:
+    """Upsert generated items as candidates; preserve existing status. Returns
+    the items that are genuinely new (first seen this run)."""
+    key = company_key(company_url)
+    keyfn = _ITEM_KEYFN[item_type]
+    now = datetime.now(timezone.utc)
+    new_items: list[dict] = []
+    for it in generated:
+        ik = keyfn(it)
+        if not ik:
+            continue
+        res = _db().items.update_one(
+            {"tenant_id": tenant_id, "company_key": key, "item_type": item_type, "item_key": ik},
+            {
+                "$set": {"data": it, "last_seen": now, "updated_at": now},
+                "$setOnInsert": {
+                    "tenant_id": tenant_id,
+                    "company_key": key,
+                    "item_type": item_type,
+                    "item_key": ik,
+                    "status": "candidate",
+                    "first_seen": now,
+                },
+            },
+            upsert=True,
+        )
+        if res.upserted_id is not None:
+            new_items.append({**it, "item_key": ik})
+    return new_items
+
+
+def get_items(tenant_id: str, company_url: str, item_type: str) -> list[dict]:
+    """Non-dismissed items, kept first then candidates (newest first within each)."""
+    cursor = _db().items.find(
+        {
+            "tenant_id": tenant_id,
+            "company_key": company_key(company_url),
+            "item_type": item_type,
+            "status": {"$ne": "dismissed"},
+        }
+    )
+    order = {"kept": 0, "candidate": 1}
+    rows = sorted(
+        cursor,
+        key=lambda r: (
+            order.get(r.get("status"), 2),
+            -(r["last_seen"].timestamp() if r.get("last_seen") else 0),
+        ),
+    )
+    return [
+        {**r.get("data", {}), "item_key": r["item_key"], "status": r.get("status", "candidate")}
+        for r in rows
+    ]
+
+
+def workspace_items(tenant_id: str, company_url: str) -> dict:
+    return {
+        "competitors": get_items(tenant_id, company_url, "competitor"),
+        "prospects": get_items(tenant_id, company_url, "prospect"),
+    }
+
+
+def set_item_status(
+    tenant_id: str, company_url: str, item_type: str, item_key: str, status: str
+) -> None:
+    """status: kept | dismissed | candidate ('candidate' clears a prior decision)."""
+    _db().items.update_one(
+        {
+            "tenant_id": tenant_id,
+            "company_key": company_key(company_url),
+            "item_type": item_type,
+            "item_key": item_key,
+        },
+        {"$set": {"status": status, "updated_at": datetime.now(timezone.utc)}},
+    )
+
+
+def item_preferences(tenant_id: str, company_url: str) -> str:
+    """Mongo-sourced preferences fallback (Tier 2 reads from Phoenix first)."""
+    rows = list(
+        _db().items.find(
+            {
+                "tenant_id": tenant_id,
+                "company_key": company_key(company_url),
+                "status": {"$in": ["kept", "dismissed"]},
+            }
+        )
+    )
+    if not rows:
+        return ""
+
+    def label(r: dict) -> str:
+        d = r.get("data", {})
+        return d.get("name") or d.get("company_name") or r["item_key"]
+
+    def names(item_type: str, status: str) -> list[str]:
+        return [label(r) for r in rows if r["item_type"] == item_type and r["status"] == status]
+
+    lines = []
+    for it, st, heading in [
+        ("competitor", "kept", "Competitors they found relevant"),
+        ("competitor", "dismissed", "Competitors they dismissed"),
+        ("prospect", "kept", "Prospects they found relevant"),
+        ("prospect", "dismissed", "Prospects they dismissed"),
+    ]:
+        vals = names(it, st)
+        if vals:
+            lines.append(f"- {heading}: {', '.join(vals)}")
+    return "\n".join(lines)
+
+
+def keep_rate(tenant_id: str, company_url: str) -> dict:
+    """Per-workspace usefulness signal: kept vs dismissed counts + rate."""
+    base = {"tenant_id": tenant_id, "company_key": company_key(company_url)}
+    kept = _db().items.count_documents({**base, "status": "kept"})
+    dismissed = _db().items.count_documents({**base, "status": "dismissed"})
+    decided = kept + dismissed
+    return {"kept": kept, "dismissed": dismissed, "keep_rate": (kept / decided) if decided else None}
 
 
 def list_companies() -> list[dict]:
