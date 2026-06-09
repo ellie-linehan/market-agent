@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-from app import store, insights, evals
+from app import store, insights, evals, learning
 from app.observability import log_feedback, log_eval
 from app.agent import root_agent, MarketAnalysis
 from google.adk.runners import InMemoryRunner
@@ -75,10 +75,19 @@ async def health():
 async def analyze(req: AnalyzeRequest):
     tenant = store.DEFAULT_TENANT
     session_id = uuid.uuid4().hex
-    # Fold in this workspace's accumulated keep/dismiss so the agents weight
-    # toward what the founder keeps and away from what they dismiss.
-    # (Phase 4 reads this from Phoenix; Mongo is the current source/fallback.)
-    preferences = await asyncio.to_thread(store.item_preferences, tenant, req.company_url)
+    # Tier 2: read the learning signal from Phoenix (Arize as the engine) — the
+    # tenant's graded keep/dismiss history. Fall back to Mongo when Phoenix has
+    # nothing yet / hasn't indexed a just-made action (freshness) or is down.
+    try:
+        preferences = await asyncio.to_thread(
+            learning.phoenix_preferences, tenant, req.company_url
+        )
+    except Exception:  # noqa: BLE001 - never let observability break analysis
+        preferences = ""
+    if not preferences:
+        preferences = await asyncio.to_thread(
+            store.item_preferences, tenant, req.company_url
+        )
     await _runner.session_service.create_session(
         app_name=_APP_NAME,
         user_id="web",
