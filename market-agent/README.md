@@ -126,6 +126,20 @@ market-agent/
 └── tests/
 ```
 
+## Roadmap — two-layer learning, privacy-first
+
+Today the workspace personalizes from your judgment. The path to a genuinely self-improving agent *team* is two layers — and the `tenant.id` tagging is already wired throughout for both.
+
+**Reasoned feedback (the real signal).** A one-line *why* on each Keep/Dismiss — *"dismissed: enterprise-only, we target SMB"* — turns a binary vote into a **generalizable preference**: a policy that applies to companies the agent has never seen, not a memorized list of names.
+
+**Layer 1 — per-workspace (private).** Your reasoned feedback is distilled into a workspace-specific strategy and applied only to your scans. Scoped by `tenant.id`; it never crosses to another workspace.
+
+**Layer 2 — fleet-level (shared, private by construction).** The *quality* signal — what makes any analysis good (specific differentiators, concrete buying triggers, real pricing) vs. what gets dismissed everywhere — is pooled across workspaces to improve the **base agent**, measured with **Arize Phoenix experiments** (A/B base-prompt variants on the aggregate graded dataset) and, later, fine-tuning. *This is where Arize is the genuine engine, not the store: the experiment/optimization harness on the graded dataset.*
+
+**The privacy guarantee.** Only *quality* features ever leave a workspace — abstracted vectors (`has_specific_differentiator`, `pricing_quality`) plus the kept/dismissed label — **never** raw competitors, prospects, or strategy. Pooling is **k-anonymous** (only patterns supported by many tenants count) and **opt-in**, with isolation enforced at the data layer (database-per-tenant). Your *taste* shapes only you; your *quality outcomes*, anonymized, lift the base for everyone — and a brand-new workspace inherits the improved base **before** giving any feedback.
+
+Also planned: multi-tenant auth, scheduled re-scans, G2/Reddit signals, and an investor multi-company view.
+
 ## License
 
 [AGPL-3.0](../LICENSE). © 2026 Eliannah Linehan.
