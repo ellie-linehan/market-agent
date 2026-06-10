@@ -228,7 +228,12 @@ def get_items(tenant_id: str, company_url: str, item_type: str) -> list[dict]:
         ),
     )
     return [
-        {**r.get("data", {}), "item_key": r["item_key"], "status": r.get("status", "candidate")}
+        {
+            **r.get("data", {}),
+            "item_key": r["item_key"],
+            "status": r.get("status", "candidate"),
+            "reason": r.get("reason"),
+        }
         for r in rows
     ]
 
@@ -241,9 +246,18 @@ def workspace_items(tenant_id: str, company_url: str) -> dict:
 
 
 def set_item_status(
-    tenant_id: str, company_url: str, item_type: str, item_key: str, status: str
+    tenant_id: str,
+    company_url: str,
+    item_type: str,
+    item_key: str,
+    status: str,
+    reason: str | None = None,
 ) -> None:
-    """status: kept | dismissed | candidate ('candidate' clears a prior decision)."""
+    """status: kept | dismissed | candidate ('candidate' clears a prior decision).
+    reason: optional one-line 'why' — the generalizable learning signal."""
+    updates = {"status": status, "updated_at": datetime.now(timezone.utc)}
+    if reason:
+        updates["reason"] = reason
     _db().items.update_one(
         {
             "tenant_id": tenant_id,
@@ -251,7 +265,7 @@ def set_item_status(
             "item_type": item_type,
             "item_key": item_key,
         },
-        {"$set": {"status": status, "updated_at": datetime.now(timezone.utc)}},
+        {"$set": updates},
     )
 
 

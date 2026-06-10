@@ -20,6 +20,7 @@ interface Competitor {
   pricing_model?: string
   item_key: string
   status: Status
+  reason?: string | null
 }
 
 interface Prospect {
@@ -31,6 +32,7 @@ interface Prospect {
   tech_stack: string[]
   item_key: string
   status: Status
+  reason?: string | null
 }
 
 interface Evaluation {
@@ -150,31 +152,43 @@ function SummaryBlock({ text }: { text: string }) {
 
 function FeedbackButtons({
   status,
+  reason: initialReason,
   onKeep,
   onDismiss,
 }: {
   status: Status
-  onKeep: () => void
-  onDismiss: () => void
+  reason?: string | null
+  onKeep: (reason: string) => void
+  onDismiss: (reason: string) => void
 }) {
+  const [reason, setReason] = useState(initialReason || '')
   return (
-    <div className="flex gap-1.5">
-      <button
-        onClick={onKeep}
-        className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
-          status === 'kept'
-            ? 'bg-charcoal text-cream border-charcoal'
-            : 'bg-white text-charcoal/60 border-cream-dark hover:border-tan'
-        }`}
-      >
-        {status === 'kept' ? '✓ Kept' : '✓ Keep'}
-      </button>
-      <button
-        onClick={onDismiss}
-        className="text-xs px-2.5 py-1 rounded-md border bg-white text-charcoal/50 border-cream-dark hover:border-red-300 hover:text-red-600 transition-colors"
-      >
-        ✕ Dismiss
-      </button>
+    <div className="flex flex-col gap-1.5 w-full">
+      <input
+        type="text"
+        value={reason}
+        onChange={e => setReason(e.target.value)}
+        placeholder="why? (optional — teaches the agent)"
+        className="text-xs bg-white border border-cream-dark rounded px-2 py-1 text-charcoal placeholder-charcoal/30 focus:outline-none focus:border-tan transition-colors"
+      />
+      <div className="flex gap-1.5">
+        <button
+          onClick={() => onKeep(reason)}
+          className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+            status === 'kept'
+              ? 'bg-charcoal text-cream border-charcoal'
+              : 'bg-white text-charcoal/60 border-cream-dark hover:border-tan'
+          }`}
+        >
+          {status === 'kept' ? '✓ Kept' : '✓ Keep'}
+        </button>
+        <button
+          onClick={() => onDismiss(reason)}
+          className="text-xs px-2.5 py-1 rounded-md border bg-white text-charcoal/50 border-cream-dark hover:border-red-300 hover:text-red-600 transition-colors"
+        >
+          ✕ Dismiss
+        </button>
+      </div>
     </div>
   )
 }
@@ -185,8 +199,8 @@ function CompetitorCard({
   onDismiss,
 }: {
   c: Competitor
-  onKeep: () => void
-  onDismiss: () => void
+  onKeep: (reason: string) => void
+  onDismiss: (reason: string) => void
 }) {
   return (
     <div
@@ -225,7 +239,7 @@ function CompetitorCard({
         </ul>
       )}
       <div className="pt-1 mt-auto">
-        <FeedbackButtons status={c.status} onKeep={onKeep} onDismiss={onDismiss} />
+        <FeedbackButtons status={c.status} reason={c.reason} onKeep={onKeep} onDismiss={onDismiss} />
       </div>
     </div>
   )
@@ -237,8 +251,8 @@ function ProspectRow({
   onDismiss,
 }: {
   p: Prospect
-  onKeep: () => void
-  onDismiss: () => void
+  onKeep: (reason: string) => void
+  onDismiss: (reason: string) => void
 }) {
   return (
     <div
@@ -277,8 +291,8 @@ function ProspectRow({
           ))}
         </div>
       </div>
-      <div className="shrink-0 sm:pt-0.5">
-        <FeedbackButtons status={p.status} onKeep={onKeep} onDismiss={onDismiss} />
+      <div className="shrink-0 sm:pt-0.5 sm:w-44">
+        <FeedbackButtons status={p.status} reason={p.reason} onKeep={onKeep} onDismiss={onDismiss} />
       </div>
     </div>
   )
@@ -356,7 +370,7 @@ export default function Home() {
     )
   }
 
-  async function sendCompetitorFeedback(c: Competitor, decision: 'keep' | 'dismiss') {
+  async function sendCompetitorFeedback(c: Competitor, decision: 'keep' | 'dismiss', reason: string) {
     const d = decision === 'keep' && c.status === 'kept' ? 'none' : decision
     await fetch(`${BACKEND}/feedback`, {
       method: 'POST',
@@ -367,12 +381,13 @@ export default function Home() {
         item_key: c.item_key,
         item_label: c.name,
         decision: d,
+        reason: reason || null,
       }),
     })
     await reloadItems(activeUrl)
   }
 
-  async function sendProspectFeedback(p: Prospect, decision: 'keep' | 'dismiss') {
+  async function sendProspectFeedback(p: Prospect, decision: 'keep' | 'dismiss', reason: string) {
     const d = decision === 'keep' && p.status === 'kept' ? 'none' : decision
     await fetch(`${BACKEND}/feedback`, {
       method: 'POST',
@@ -383,6 +398,7 @@ export default function Home() {
         item_key: p.item_key,
         item_label: p.company_name,
         decision: d,
+        reason: reason || null,
       }),
     })
     await reloadItems(activeUrl)
@@ -513,8 +529,8 @@ export default function Home() {
                           <CompetitorCard
                             key={c.item_key}
                             c={c}
-                            onKeep={() => sendCompetitorFeedback(c, 'keep')}
-                            onDismiss={() => sendCompetitorFeedback(c, 'dismiss')}
+                            onKeep={reason => sendCompetitorFeedback(c, 'keep', reason)}
+                            onDismiss={reason => sendCompetitorFeedback(c, 'dismiss', reason)}
                           />
                         ))}
                       </div>
@@ -526,8 +542,8 @@ export default function Home() {
                       <CompetitorCard
                         key={c.item_key}
                         c={c}
-                        onKeep={() => sendCompetitorFeedback(c, 'keep')}
-                        onDismiss={() => sendCompetitorFeedback(c, 'dismiss')}
+                        onKeep={reason => sendCompetitorFeedback(c, 'keep', reason)}
+                        onDismiss={reason => sendCompetitorFeedback(c, 'dismiss', reason)}
                       />
                     ))}
                   </div>
@@ -554,8 +570,8 @@ export default function Home() {
                           <ProspectRow
                             key={p.item_key}
                             p={p}
-                            onKeep={() => sendProspectFeedback(p, 'keep')}
-                            onDismiss={() => sendProspectFeedback(p, 'dismiss')}
+                            onKeep={reason => sendProspectFeedback(p, 'keep', reason)}
+                            onDismiss={reason => sendProspectFeedback(p, 'dismiss', reason)}
                           />
                         ))}
                       </div>
@@ -567,8 +583,8 @@ export default function Home() {
                       <ProspectRow
                         key={p.item_key}
                         p={p}
-                        onKeep={() => sendProspectFeedback(p, 'keep')}
-                        onDismiss={() => sendProspectFeedback(p, 'dismiss')}
+                        onKeep={reason => sendProspectFeedback(p, 'keep', reason)}
+                        onDismiss={reason => sendProspectFeedback(p, 'dismiss', reason)}
                       />
                     ))}
                   </div>

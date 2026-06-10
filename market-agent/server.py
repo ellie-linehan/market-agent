@@ -67,6 +67,7 @@ class FeedbackRequest(BaseModel):
     item_key: str
     item_label: str
     decision: str  # "keep" | "dismiss"
+    reason: str | None = None  # optional one-line "why" — the real learning signal
 
 
 @app.get("/health")
@@ -271,7 +272,13 @@ async def feedback(req: FeedbackRequest):
     tenant = store.DEFAULT_TENANT
     status = {"keep": "kept", "dismiss": "dismissed"}.get(req.decision, "candidate")
     await asyncio.to_thread(
-        store.set_item_status, tenant, req.company_url, req.item_type, req.item_key, status
+        store.set_item_status,
+        tenant,
+        req.company_url,
+        req.item_type,
+        req.item_key,
+        status,
+        req.reason,
     )
     # Keep the user_feedback span — Tier 2 reads it back as the learning signal.
     log_feedback(
@@ -291,7 +298,7 @@ async def feedback(req: FeedbackRequest):
             f"feedback: {req.item_label}"[:60],
             label=req.decision,
             score=1.0 if req.decision == "keep" else 0.0,
-            explanation=f"{req.item_type}: {req.item_label}",
+            explanation=req.reason or f"{req.item_type}: {req.item_label}",
             kind="HUMAN",
         )
     kr = await asyncio.to_thread(store.keep_rate, tenant, req.company_url)
