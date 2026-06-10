@@ -4,7 +4,7 @@
 
 Built for the **Google Cloud Rapid Agent Hackathon** (Arize track) on **Gemini 3.5 Flash** + **Google ADK**, with **Arize Phoenix** as the evaluation & improvement engine.
 
-**🔗 Live demo:** https://3ms-market-agent.netlify.app — login `demo` / `hackathon`
+**🔗 Live demo:** https://3ms-market-agent.netlify.app
 **📦 App, setup & full docs:** [`market-agent/`](market-agent/README.md)
 
 ---
