@@ -37,6 +37,8 @@ digraph architecture {
   synth -> trace [label="every run"];
   synth -> evals [label="groundedness"];
   evals -> competitive [label="LEARN — next-scan preferences\nread back from Phoenix", style="bold,dashed", color="#c9a227", fontcolor="#a07b1e"];
+  evals -> icp [style="bold,dashed", color="#c9a227"];
   mongo -> competitive [label="fallback (freshness)", style="dotted"];
+  mongo -> icp [style="dotted"];
   evals -> mcp [style=invis];
 }
